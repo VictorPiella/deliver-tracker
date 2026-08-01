@@ -1,0 +1,14 @@
+services:
+  package-tracker:
+    build: .
+    container_name: package-tracker
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/data
+    environment:
+      - DB_PATH=/data/packages.db
+      - USE_MOCK_GMAIL=true
+      - ENABLE_BACKGROUND_WORKER=true
+      - FLASK_SECRET_KEY=change-me-in-production
+    restart: unless-stopped

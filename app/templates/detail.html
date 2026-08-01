@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ package.title or package.external_package_id }}{% endblock %}
+{% block content %}
+
+<a class="back-link" href="{{ url_for('index') }}">&larr; Volver al manifiesto</a>
+
+<div class="detail-header">
+  <span class="badge">{{ package.status_label }}</span>
+  <div class="detail-header-top">
+    {% if package.image_url %}
+    <img class="detail-thumb" src="{{ package.image_url }}" alt="">
+    {% else %}
+    <div class="detail-thumb detail-thumb-fallback {{ package.source }}">{{ package.source[:2]|upper }}</div>
+    {% endif %}
+    <div style="flex:1">
+      <h2>{{ package.title or '(sin nombre de producto)' }}</h2>
+      <div class="progress-track">
+        <div class="progress-fill {{ package.status }}" style="width: {{ package.progress_pct }}%;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="detail-grid">
+    <div class="detail-field">
+      <label>Origen</label>
+      <span class="source-tag {{ package.source }}">{{ package.source }}</span>
+    </div>
+    <div class="detail-field">
+      <label>ID de paquete</label>
+      <span>{{ package.external_package_id }}</span>
+    </div>
+    <div class="detail-field">
+      <label>ID de pedido</label>
+      <span>{{ package.order_external_id or '—' }}</span>
+    </div>
+    <div class="detail-field">
+      <label>Transportista</label>
+      <span>{{ package.courier or 'No identificado' }}</span>
+    </div>
+    <div class="detail-field">
+      <label>Tracking transportista</label>
+      <span>{{ package.courier_tracking_number or '—' }}</span>
+    </div>
+  </div>
+</div>
+
+<ul class="timeline">
+  {% for ev in timeline %}
+  <li {% if loop.last %}class="is-last"{% endif %}>
+    <div class="t-date">{{ ev.event_date.strftime('%d %b %Y, %H:%M') }}</div>
+    <div class="t-status">{{ ev.status_label }}</div>
+    <div class="t-raw">{{ ev.gmail_subject }}</div>
+  </li>
+  {% endfor %}
+</ul>
+
+{% endblock %}

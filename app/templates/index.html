@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Paquetes en tránsito{% endblock %}
+{% block content %}
+
+{% if packages %}
+<div class="manifest-header">
+  <div>Origen</div>
+  <div>Paquete</div>
+  <div>Estado</div>
+  <div>Actualizado</div>
+  <div style="text-align:right">Eventos</div>
+</div>
+
+{% for p in packages %}
+<a class="package-row" href="{{ url_for('package_detail', package_id=p.id) }}">
+  <span class="source-tag {{ p.source }}">{{ p.source }}</span>
+
+  <div class="pkg-info">
+    {% if p.image_url %}
+    <img class="pkg-thumb" src="{{ p.image_url }}" alt="" loading="lazy">
+    {% else %}
+    <div class="pkg-thumb pkg-thumb-fallback {{ p.source }}">{{ p.source[:2]|upper }}</div>
+    {% endif %}
+    <div>
+      <div class="pkg-title">{{ p.title or '(sin nombre de producto)' }}</div>
+      <div class="pkg-id">#{{ p.external_package_id }}</div>
+    </div>
+  </div>
+
+  <div class="status-cell">
+    <span class="status-label {{ p.status }}">{{ p.status_label }}</span>
+    <div class="progress-track">
+      <div class="progress-fill {{ p.status }}" style="width: {{ p.progress_pct }}%;"></div>
+    </div>
+  </div>
+
+  <div class="updated-cell">{{ p.last_updated.strftime('%d %b %Y, %H:%M') if p.last_updated else '—' }}</div>
+
+  <div class="events-cell">{{ p.n_events }}</div>
+</a>
+{% endfor %}
+
+{% else %}
+<div class="empty-state">
+  <div class="stamp">Sin paquetes registrados</div>
+  <p>Cuando lleguen emails de Amazon o AliExpress aparecerán aquí.</p>
+</div>
+{% endif %}
+
+{% endblock %}
