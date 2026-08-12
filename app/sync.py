@@ -121,11 +121,67 @@ def ingest_event(session, event: dict) -> bool:
 
     if event.get("courier_tracking_number") and not package.courier_tracking_number:
         package.courier_tracking_number = event["courier_tracking_number"]
+    if event.get("courier") and not package.courier:
+        package.courier = event["courier"]
 
     if event.get("title") and not order.title:
         order.title = event["title"]
     if event.get("image_url") and not order.image_url:
         order.image_url = event["image_url"]
+
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        return False
+
+    return True
+
+
+def ingest_carrier_event(session, event: dict, courier: str) -> bool:
+    """
+    Ingesta un evento de transportista de última milla (GLS) sobre un Package
+    YA EXISTENTE (de Amazon/AliExpress) — a diferencia de ingest_event, no
+    crea Order/Package nuevos. Busca el Package por package_id (external_package_id,
+    de cualquier fuente) y si no por courier_tracking_number ya guardado. Si no
+    hay un match inequívoco, descarta el evento (mejor no enlazar que enlazar mal).
+    Devuelve True si se ha creado un evento nuevo.
+    """
+    existing = (
+        session.query(PackageEvent)
+        .filter_by(gmail_message_id=event["message_id"])
+        .first()
+    )
+    if existing is not None:
+        return False
+
+    package = None
+    if event.get("package_id"):
+        package = session.query(Package).filter_by(external_package_id=event["package_id"]).first()
+    if package is None and event.get("tracking_number"):
+        package = session.query(Package).filter_by(courier_tracking_number=event["tracking_number"]).first()
+    if package is None:
+        return False
+
+    pe = PackageEvent(
+        package_id=package.id,
+        status=event["status"],
+        status_label_raw=event["status_label_raw"],
+        gmail_message_id=event["message_id"],
+        gmail_subject=event["status_label_raw"],
+        event_date=event["event_date"],
+    )
+    session.add(pe)
+
+    if package.status == "unknown" or status_rank(event["status"]) >= status_rank(package.status):
+        package.status = event["status"]
+        package.status_label_raw = event["status_label_raw"]
+        package.last_updated = event["event_date"]
+
+    if not package.courier:
+        package.courier = courier
+    if event.get("tracking_number") and not package.courier_tracking_number:
+        package.courier_tracking_number = event["tracking_number"]
 
     try:
         session.commit()

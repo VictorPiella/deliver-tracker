@@ -2,19 +2,18 @@ import os
 from flask import Flask, render_template, jsonify, redirect, url_for, flash
 from .models import get_session, Order, Package, PackageEvent, STATUS_LABELS_ES, STATUS_ORDER
 from .gmail_sync import run_sync
+from .cleanup import delete_package
+from .mqtt_publish import publish_all_packages, unpublish_package
 
 DB_PATH = os.environ.get("DB_PATH", "data/packages.db")
-# Mientras no esté conectado el OAuth real (ver gmail_sync.NOTA_PRODUCCION),
-# usamos el mock con datos reales capturados durante el desarrollo. Cuando el
-# OAuth esté listo, basta con cambiar este import por el adaptador real.
+# Mientras no esté conectado el OAuth real, usamos el mock con datos reales
+# capturados durante el desarrollo.
 USE_MOCK_GMAIL = os.environ.get("USE_MOCK_GMAIL", "true").lower() == "true"
 
 if USE_MOCK_GMAIL:
     from .mock_gmail import mock_search_fn as gmail_search_fn, mock_get_thread_fn as gmail_get_thread_fn
 else:
-    # NOTA_PRODUCCION: sustituir por el adaptador real de Gmail (google-api-python-client + OAuth)
-    gmail_search_fn = None
-    gmail_get_thread_fn = None
+    from .gmail_oauth import gmail_search_fn, gmail_get_thread_fn
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-change-me")
@@ -110,13 +109,31 @@ def api_packages():
     return jsonify(data)
 
 
+@app.route("/package/<int:package_id>/delete", methods=["POST"])
+def delete_package_route(package_id):
+    session = get_session(DB_PATH)
+    p = session.query(Package).get(package_id)
+    if p is None:
+        session.close()
+        return "Paquete no encontrado", 404
+
+    delete_package(session, p)
+    session.commit()
+    session.close()
+    unpublish_package(package_id)
+    flash("Paquete eliminado.", "success")
+    return redirect(url_for("index"))
+
+
 @app.route("/sync", methods=["POST"])
 def trigger_sync():
-    if gmail_search_fn is None:
-        flash("Gmail no está conectado todavía (falta configurar OAuth). Usando datos de ejemplo.", "warning")
+    try:
+        summary = run_sync(DB_PATH, gmail_search_fn, gmail_get_thread_fn)
+    except RuntimeError as e:
+        flash(str(e), "warning")
         return redirect(url_for("index"))
 
-    summary = run_sync(DB_PATH, gmail_search_fn, gmail_get_thread_fn)
+    publish_all_packages(DB_PATH)
     flash(
         f"Escaneo completo: {summary['scanned']} emails revisados, "
         f"{summary['ingested']} eventos nuevos.",

@@ -2,13 +2,21 @@
 {% block title %}{{ package.title or package.external_package_id }}{% endblock %}
 {% block content %}
 
-<a class="back-link" href="{{ url_for('index') }}">&larr; Volver al manifiesto</a>
+<div class="detail-toolbar">
+  <a class="back-link" href="{{ url_for('index') }}">&larr; Volver al manifiesto</a>
+  <form method="POST" action="{{ url_for('delete_package_route', package_id=package.id) }}"
+        onsubmit="return confirm('¿Eliminar este paquete? No se puede deshacer.');">
+    <button type="submit" class="btn-delete">Eliminar paquete</button>
+  </form>
+</div>
 
 <div class="detail-header">
   <span class="badge">{{ package.status_label }}</span>
   <div class="detail-header-top">
     {% if package.image_url %}
-    <img class="detail-thumb" src="{{ package.image_url }}" alt="">
+    <img class="detail-thumb" src="{{ package.image_url }}" alt=""
+         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+    <div class="detail-thumb detail-thumb-fallback {{ package.source }}" style="display:none">{{ package.source[:2]|upper }}</div>
     {% else %}
     <div class="detail-thumb detail-thumb-fallback {{ package.source }}">{{ package.source[:2]|upper }}</div>
     {% endif %}

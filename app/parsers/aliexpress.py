@@ -52,6 +52,31 @@ def extract_image_url(html_body: str = "") -> str | None:
     return m.group(1) if m else None
 
 
+# Formato "detalle de pedido" (usado en "pendiente de confirmación", "¿cómo ha
+# ido?" y algún email de seguimiento): a diferencia del resto de emails
+# individuales, este SÍ trae nombre + imagen del producto, en un bloque
+# EDM-ORDER-LOGISTICS-product-name distinto del formato 'merge'.
+ORDER_DETAIL_IMAGE_RE = re.compile(
+    r'<img\s+src="(https://ae-pic-a1\.aliexpress-media\.com/kf/[^"]+)"\s+style="border-radius',
+    re.IGNORECASE
+)
+ORDER_DETAIL_TITLE_RE = re.compile(
+    r'class="EDM-ORDER-LOGISTICS-product-name"[^>]*>\s*<div>\s*<span>([^<]+)</span>',
+    re.IGNORECASE | re.DOTALL
+)
+
+
+def extract_order_detail_product(html_body: str = "") -> tuple:
+    """Extrae (título, imagen) del bloque de detalle de pedido, si está presente."""
+    if not html_body:
+        return None, None
+    title_match = ORDER_DETAIL_TITLE_RE.search(html_body)
+    image_match = ORDER_DETAIL_IMAGE_RE.search(html_body)
+    title = title_match.group(1).strip() if title_match else None
+    image_url = image_match.group(1) if image_match else None
+    return title, image_url
+
+
 # --- Formato "merge": "Tus N paquetes tienen actualizaciones de entrega" ---
 # Este formato agrupa varios paquetes en un único email, y a diferencia de los
 # individuales SÍ trae el trackingNumber real del courier (Cainiao/4PX/etc) y
@@ -163,7 +188,7 @@ def parse(sender: str, subject: str, body_text: str, message_id: str, event_date
         'package_id': '315193141453520012' | 'AP00824363068180' | None,
         'status': 'in_country',
         'status_label_raw': subject,
-        'title': None,   # aliexpress individual no trae el nombre del producto en el asunto
+        'title': 'MC-38 Sensor...' | None,  # solo si el email trae el bloque de detalle de pedido (ver extract_order_detail_product)
         'image_url': 'https://ae-pic-a1.aliexpress-media.com/...' | None,
         'courier_tracking_number': 'LP00827165784034' | None,  # solo disponible en formato merge
         'message_id': ...,
@@ -210,6 +235,9 @@ def parse(sender: str, subject: str, body_text: str, message_id: str, event_date
     package_id = package_match.group(1) if package_match else (ap_match.group(1) if ap_match else None)
 
     image_url = extract_image_url(html_body)
+    detail_title, detail_image_url = extract_order_detail_product(html_body)
+    if image_url is None:
+        image_url = detail_image_url
 
     # Si el asunto es "Pedido X: pedido enviado", no hay package_id propio todavía;
     # en ese caso usamos el order_id también como package_id provisional, y cuando
@@ -224,7 +252,7 @@ def parse(sender: str, subject: str, body_text: str, message_id: str, event_date
         "package_id": package_id,
         "status": status,
         "status_label_raw": subject,
-        "title": None,
+        "title": detail_title,
         "image_url": image_url,
         "courier_tracking_number": None,
         "message_id": message_id,

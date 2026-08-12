@@ -17,7 +17,9 @@
 
   <div class="pkg-info">
     {% if p.image_url %}
-    <img class="pkg-thumb" src="{{ p.image_url }}" alt="" loading="lazy">
+    <img class="pkg-thumb" src="{{ p.image_url }}" alt="" loading="lazy"
+         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+    <div class="pkg-thumb pkg-thumb-fallback {{ p.source }}" style="display:none">{{ p.source[:2]|upper }}</div>
     {% else %}
     <div class="pkg-thumb pkg-thumb-fallback {{ p.source }}">{{ p.source[:2]|upper }}</div>
     {% endif %}

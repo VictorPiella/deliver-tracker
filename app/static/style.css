@@ -121,6 +121,7 @@ main {
 }
 .source-tag.amazon { color: #B8651E; }
 .source-tag.aliexpress { color: #C1432E; }
+.source-tag.correos { color: #2C5F8A; }
 
 .pkg-info {
   display: flex;
@@ -147,6 +148,8 @@ main {
 }
 .pkg-thumb-fallback.amazon { background: #FFF3E6; color: #B8651E; }
 .pkg-thumb-fallback.aliexpress { background: #FDEDEA; color: #C1432E; }
+.pkg-thumb-fallback.correos { background: #E8F0F7; color: #2C5F8A; }
+.pkg-thumb-fallback.correos { background: #E8F0F7; color: #2C5F8A; }
 
 .pkg-title {
   font-family: var(--font-display);
@@ -218,9 +221,28 @@ main {
   letter-spacing: 0.06em;
   color: var(--steel);
   text-decoration: none;
-  margin-bottom: 20px;
 }
 .back-link:hover { color: var(--ink); }
+
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.btn-delete {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: transparent;
+  color: var(--stamp-red);
+  border: 1px solid var(--stamp-red);
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.btn-delete:hover { background: var(--stamp-red); color: #FFFFFF; }
 
 .detail-header {
   border: 2px solid var(--ink);
@@ -270,6 +292,7 @@ main {
 }
 .detail-thumb-fallback.amazon { background: #FFF3E6; color: #B8651E; }
 .detail-thumb-fallback.aliexpress { background: #FDEDEA; color: #C1432E; }
+.detail-thumb-fallback.correos { background: #E8F0F7; color: #2C5F8A; }
 
 .detail-header h2 {
   font-family: var(--font-display);

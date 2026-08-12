@@ -8,7 +8,15 @@ services:
       - ./data:/data
     environment:
       - DB_PATH=/data/packages.db
-      - USE_MOCK_GMAIL=true
+      - USE_MOCK_GMAIL=false
       - ENABLE_BACKGROUND_WORKER=true
-      - FLASK_SECRET_KEY=change-me-in-production
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-change-me-in-production}
+      # Integración Home Assistant (MQTT Discovery). Desactivada por defecto;
+      # pon MQTT_ENABLED=true y rellena el resto para publicar cada paquete
+      # como sensor en HA.
+      - MQTT_ENABLED=false
+      - MQTT_HOST=
+      - MQTT_PORT=1883
+      - MQTT_USERNAME=
+      - MQTT_PASSWORD=
     restart: unless-stopped

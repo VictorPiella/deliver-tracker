@@ -20,8 +20,8 @@ Gmail vía OAuth — ver NOTA_PRODUCCION abajo).
 """
 from datetime import datetime, timedelta
 from .models import get_session, Package
-from .sync import ingest_event
-from .parsers import amazon, aliexpress
+from .sync import ingest_event, ingest_carrier_event
+from .parsers import amazon, aliexpress, gls, correos
 
 # --- Configuración ---
 FIRST_SCAN_DAYS = 10       # cuántos días hacia atrás mirar en el primerísimo escaneo
@@ -39,6 +39,11 @@ AMAZON_SENDERS = [
     # tracking pedidos entrantes, así que ni la buscamos.
 ]
 ALIEXPRESS_SENDER = "transaction@notice.aliexpress.com"
+# Transportistas de última milla: GLS se enlaza a un Package ya existente
+# (trae el package_id de AliExpress en el cuerpo); Correos no trae ningún ID
+# compartido, así que se trackea como entrada independiente (ver parsers/correos.py).
+GLS_SENDER_DOMAIN = gls.SENDER_DOMAIN
+CORREOS_SENDER_DOMAIN = correos.SENDER_DOMAIN
 
 
 def build_search_query(newer_than_days: int) -> str:
@@ -47,7 +52,10 @@ def build_search_query(newer_than_days: int) -> str:
     acotada a los últimos N días.
     """
     amazon_clause = " OR ".join(f"from:{s}" for s in AMAZON_SENDERS)
-    query = f"({amazon_clause}) OR from:{ALIEXPRESS_SENDER}"
+    query = (
+        f"({amazon_clause}) OR from:{ALIEXPRESS_SENDER} "
+        f"OR from:{GLS_SENDER_DOMAIN} OR from:{CORREOS_SENDER_DOMAIN}"
+    )
     query += f" newer_than:{newer_than_days}d"
     return query
 
@@ -59,15 +67,19 @@ def is_first_scan(db_path: str) -> bool:
     return count == 0
 
 
+def parse_event_date(date_str: str) -> datetime:
+    try:
+        return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return datetime.utcnow()
+
+
 def parse_message(sender: str, subject: str, plaintext_body: str, html_body: str, message_id: str, date_str: str):
     """
     Aplica el parser correspondiente según el remitente. Devuelve el dict
     normalizado o None si el mensaje no aplica a ningún parser conocido.
     """
-    try:
-        event_date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-    except (ValueError, AttributeError):
-        event_date = datetime.utcnow()
+    event_date = parse_event_date(date_str)
 
     if amazon.matches(sender):
         return amazon.parse(sender, subject, plaintext_body or "", message_id, event_date, html_body=html_body or "")
@@ -115,13 +127,46 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
         # Solo pedimos el cuerpo completo (otra llamada a la API) si el mensaje
         # es de un remitente que efectivamente vamos a parsear; evita llamadas
         # de más a get_thread para mensajes irrelevantes que se cuelan en la query.
-        if not (amazon.matches(sender) or aliexpress.matches(sender)):
+        if not (amazon.matches(sender) or aliexpress.matches(sender)
+                or gls.matches(sender) or correos.matches(sender)):
             skipped += 1
             continue
 
         body = gmail_get_thread_fn(message_id)
         plaintext_body = body.get("plaintext_body", "") if body else ""
         html_body = body.get("html_body", "") if body else ""
+
+        if gls.matches(sender):
+            # GLS se enlaza a un Package ya existente (Amazon/AliExpress), no
+            # crea uno nuevo — ver sync.ingest_carrier_event.
+            event_date = parse_event_date(date_str)
+            parsed = gls.parse(sender, subject, plaintext_body or "", message_id, event_date)
+            if parsed is None:
+                skipped += 1
+                continue
+            created = ingest_carrier_event(session, parsed, courier="gls")
+            if created:
+                ingested += 1
+                log(f"[gmail_sync] + gls {parsed['status']:<16} {subject[:50]}")
+            else:
+                skipped += 1
+            continue
+
+        if correos.matches(sender):
+            # Correos no trae ningún ID de Amazon/AliExpress: se trackea como
+            # entrada independiente (source='correos'), igual que Amazon/AliExpress.
+            event_date = parse_event_date(date_str)
+            parsed = correos.parse(sender, subject, plaintext_body or "", message_id, event_date, html_body=html_body or "")
+            if parsed is None:
+                skipped += 1
+                continue
+            created = ingest_event(session, parsed)
+            if created:
+                ingested += 1
+                log(f"[gmail_sync] + correos {parsed['status']:<16} {subject[:50]}")
+            else:
+                skipped += 1
+            continue
 
         parsed = parse_message(sender, subject, plaintext_body, html_body, message_id, date_str)
         if parsed is None:

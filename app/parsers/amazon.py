@@ -85,6 +85,17 @@ PRODUCT_IMAGE_RE_ALT = re.compile(
     re.IGNORECASE
 )
 
+# Las miniaturas de los emails vienen recortadas a ~90px (p.ej. "._SS90_.jpg").
+# El CDN de Amazon sirve cualquier tamaño con solo cambiar ese sufijo, así que
+# pedimos una versión más nítida para el panel (donde se muestra hasta 72px,
+# y más aún en pantallas de alta densidad).
+IMAGE_SIZE_SUFFIX_RE = re.compile(r"\._[A-Z]{2,3}\d+(?:,\d+)?_\.")
+IMAGE_UPSCALE_SUFFIX = "._SL320_."
+
+
+def _upscale_image_url(url: str) -> str:
+    return IMAGE_SIZE_SUFFIX_RE.sub(IMAGE_UPSCALE_SUFFIX, url, count=1)
+
 
 def extract_image_url(html_body: str = "") -> str | None:
     """Extrae la URL de la imagen del producto del HTML del email, si está presente."""
@@ -92,10 +103,10 @@ def extract_image_url(html_body: str = "") -> str | None:
         return None
     m = PRODUCT_IMAGE_RE.search(html_body)
     if m:
-        return m.group(1)
+        return _upscale_image_url(m.group(1))
     m = PRODUCT_IMAGE_RE_ALT.search(html_body)
     if m:
-        return m.group(1)
+        return _upscale_image_url(m.group(1))
     return None
 
 
