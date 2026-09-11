@@ -53,6 +53,11 @@ services:
       # Hora que se MUESTRA en el panel (lo guardado siempre es UTC).
       DISPLAY_TZ: "Europe/Madrid"
 
+      # Tu codigo postal. GLS lo pide a mano en su buscador (no admite
+      # enlace directo), asi que el panel te lo recuerda al copiar el nº
+      # de envio. Dejalo vacio si no lo quieres.
+      POSTAL_CODE: "08552"
+
       # Los paquetes entregados se van solos a la papelera pasados estos dias.
       # NO se borran: siguen recuperables. 0 desactiva el archivado.
       PURGE_DELIVERED_AFTER_DAYS: "30"

@@ -8,6 +8,7 @@ paquetes que ya estaban guardados, sin migración ninguna.
 Los formatos salen de los emails reales, no de adivinar — salvo el de GLS, que
 va marcado como tal más abajo.
 """
+import os
 import re
 
 # Nº de pedido de Amazon: 408-1234567-1234567
@@ -48,24 +49,23 @@ def url_de_seguimiento(source: str, order_id: str | None,
         return None
 
     if source == "gls":
-        # GLS no mete en sus emails ningún enlace reutilizable: sólo
-        # redirecciones opacas (click.comunicaciones.gls-spain.com) distintas en
-        # cada correo. Así que hay que usar su buscador público.
+        # GLS no admite enlace directo, y no por falta de intentarlo. Probadas
+        # sus cuatro entradas contra la web real:
+        #   mygls.gls-spain.es/e/<nº>              -> /not-found
+        #   mygls.gls-spain.es/e/?codigo=&cpDst=   -> /not-found
+        #   trackin-gls/inc/tracking_code.php      -> "'Postal code' is mandatory
+        #       to this user" con cualquier numero, incluso desde el formulario
+        #       de la propia GLS: roto de su lado
+        #   gls-group.com/...?match=<nº>           -> acepta el numero por URL y
+        #       lanza la busqueda, pero no encuentra estos envios (ni con el
+        #       numero tal cual ni rellenado a 15 digitos con ceros)
         #
-        # De las cuatro entradas que tiene GLS, ésta es la que funciona:
-        #   - mygls.gls-spain.es/e/<nº>            -> redirige a /not-found
-        #   - mygls.gls-spain.es/e/?codigo=&cpDst= -> redirige a /not-found
-        #   - .../trackin-gls/inc/tracking_code.php -> su propia web da
-        #     "'Postal code' is mandatory to this user" con cualquier número;
-        #     está roto del lado de GLS, no es cosa de los parámetros
-        #   - ésta, que carga la página y lanza la búsqueda con el número
-        #
-        # Y no necesita código postal, que era justo lo que la parecía pedir el
-        # formulario de su web.
-        numero = tracking_number or package_id
-        if numero:
-            return f"https://gls-group.com/ES/es/seguimiento-envio/?match={numero}&international=1"
-        return None
+        # La pagina que si funciona es /parcel-tracking, pero es una SPA con
+        # reCAPTCHA invisible y sin parametros en la URL: hay que teclear el nº
+        # de envio y el codigo postal a mano. Asi que el enlace lleva ahi y el
+        # panel se encarga de poner el numero en el portapapeles y recordarte el
+        # codigo postal (ver POSTAL_CODE).
+        return "https://mygls.gls-spain.es/parcel-tracking"
 
     return None
 
@@ -78,3 +78,17 @@ def url_del_transportista(courier: str | None, tracking_number: str | None) -> s
     if not courier or not tracking_number:
         return None
     return url_de_seguimiento(courier.lower(), None, None, tracking_number)
+
+
+# Codigo postal de destino. GLS lo pide a mano en su buscador y no hay forma de
+# pasarselo por URL, asi que el panel al menos te lo recuerda en vez de que
+# tengas que acordarte cada vez.
+POSTAL_CODE = os.environ.get("POSTAL_CODE", "").strip()
+
+# Fuentes cuyo seguimiento no admite enlace directo: hay que meter los datos a
+# mano en su web.
+FUENTES_A_MANO = {"gls"}
+
+
+def requiere_datos_a_mano(source: str | None) -> bool:
+    return (source or "").lower() in FUENTES_A_MANO

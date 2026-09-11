@@ -29,7 +29,9 @@ from .timeutils import utcnow, a_zona_local, formatear
 from .gmail_sync import run_sync
 from .cleanup import hard_delete_package, restore_package, soft_delete_package
 from .sync import merge_packages, recompute_status_from_events
-from .tracking import url_de_seguimiento, url_del_transportista
+from .tracking import (
+    POSTAL_CODE, requiere_datos_a_mano, url_de_seguimiento, url_del_transportista,
+)
 from .mqtt_publish import publish_all_packages, unpublish_package
 
 # Valor especial del desplegable de estado: suelta el estado manual y vuelve a
@@ -233,6 +235,7 @@ def create_app(db_path: str | None = None, use_mock_gmail: bool | None = None,
         return {
             "n_papelera": g.db.query(Package).filter(Package.deleted_at.isnot(None)).count(),
             "n_sin_reconocer": g.db.query(UnparsedEmail).count(),
+            "codigo_postal": POSTAL_CODE,
         }
 
     register_routes(app)
@@ -270,6 +273,7 @@ def register_routes(app: Flask) -> None:
                 p.external_package_id,
                 p.courier_tracking_number,
             ),
+            "seguimiento_a_mano": requiere_datos_a_mano(p.source),
         } for p in packages]
 
         # "Finalizado" incluye los cancelados: un pedido cancelado no está en
@@ -331,6 +335,7 @@ def register_routes(app: Flask) -> None:
                 url_del_transportista(p.courier, p.courier_tracking_number)
                 if (p.courier or "").lower() != p.source.lower() else None
             ),
+            "seguimiento_a_mano": requiere_datos_a_mano(p.source),
         }
         candidatos = [{
             "id": otro.id,

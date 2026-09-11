@@ -108,8 +108,15 @@
     </form>
 
     {% if p.url_seguimiento %}
-    <a class="icon-btn" href="{{ p.url_seguimiento }}" target="_blank" rel="noopener noreferrer"
-       title="Abrir el seguimiento en {{ p.source }}" aria-label="Abrir el seguimiento en {{ p.source }}">
+    <a class="icon-btn{{ ' copia-antes' if p.seguimiento_a_mano }}" href="{{ p.url_seguimiento }}"
+       target="_blank" rel="noopener noreferrer"
+       {% if p.seguimiento_a_mano %}
+       data-copiar="{{ p.courier_tracking_number or p.external_package_id }}"
+       title="{{ p.source|upper }} pide los datos a mano. Se copia el nº de envío al portapapeles{% if codigo_postal %}; tu código postal es {{ codigo_postal }}{% endif %}"
+       {% else %}
+       title="Abrir el seguimiento en {{ p.source }}"
+       {% endif %}
+       aria-label="Abrir el seguimiento en {{ p.source }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
            stroke-linecap="round" stroke-linejoin="round">
         <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
@@ -134,6 +141,8 @@
 {% endfor %}
 </div>
 
+<div class="aviso-copiado" id="aviso-copiado" data-cp="{{ codigo_postal }}" hidden></div>
+
 <div class="empty" id="sin-resultados" hidden>
   <div class="empty-title">Nada coincide</div>
   <p>Prueba con otro filtro o término de búsqueda.</p>
@@ -156,6 +165,27 @@
 {% endif %}
 
 <script>
+  // GLS no admite enlace directo: su buscador pide el nº de envío y el código
+  // postal a mano. Al menos el número va al portapapeles de camino, para no
+  // tener que ir a buscarlo.
+  (function () {
+    document.querySelectorAll('a.copia-antes').forEach(function (a) {
+      a.addEventListener('click', function () {
+        var numero = a.dataset.copiar;
+        if (!numero || !navigator.clipboard) return;
+        navigator.clipboard.writeText(numero).then(function () {
+          var aviso = document.getElementById('aviso-copiado');
+          if (!aviso) return;
+          aviso.textContent = 'Nº ' + numero + ' copiado' +
+            (aviso.dataset.cp ? ' · código postal ' + aviso.dataset.cp : '');
+          aviso.hidden = false;
+          clearTimeout(aviso._t);
+          aviso._t = setTimeout(function () { aviso.hidden = true; }, 6000);
+        }).catch(function () {});
+      });
+    });
+  })();
+
   // Filtro y búsqueda en cliente: la lista de un panel doméstico cabe entera en
   // la página, así que no hace falta ir al servidor para esto.
   (function () {
