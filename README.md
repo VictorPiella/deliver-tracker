@@ -113,16 +113,27 @@ ssh-keygen -t ed25519 -C "deliver-tracker-deploy"
 
 Sin contraseña: el script tiene que poder conectarse solo.
 
-**2. Instala la pública en Unraid.** Lo más simple es la interfaz web:
-*Settings → Management Access → SSH*, y pega ahí el contenido de
-`~/.ssh/id_ed25519.pub`. Así persiste sola.
+**2. Instala la pública en Unraid, desde su terminal web.** Es la via mas
+directa: no pide contraseña (ya estás autenticado en la interfaz) y surte
+efecto al momento.
 
-Si prefieres la terminal, este comando la instala **y la hace persistente**
-(te pedirá la contraseña de root una vez):
+En la web de Unraid, arriba a la derecha, hay un icono de terminal (`>_`) que
+abre una consola de root en el navegador. Pega ahí esta línea, sustituyendo
+`TU_CLAVE_PUBLICA` por el contenido de `~/.ssh/id_ed25519.pub`:
 
 ```bash
-cat ~/.ssh/id_ed25519.pub | ssh root@192.168.1.10 "mkdir -p /root/.ssh /boot/config/ssh && cat >> /root/.ssh/authorized_keys && sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys && cp /root/.ssh/authorized_keys /boot/config/ssh/root.pubkeys && chmod 600 /root/.ssh/authorized_keys /boot/config/ssh/root.pubkeys && echo INSTALADA"
+mkdir -p /root/.ssh /boot/config/ssh && echo 'TU_CLAVE_PUBLICA' >> /root/.ssh/authorized_keys && sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys && cp /root/.ssh/authorized_keys /boot/config/ssh/root.pubkeys && chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys /boot/config/ssh/root.pubkeys && echo INSTALADA
 ```
+
+Comprueba también que en *Settings → Management Access* el acceso SSH de root
+está permitido (la opción suele ser **"Allow root SSH login"**; vale tanto *Yes*
+como *Only allow keys*, que es más restrictiva y suficiente para esto).
+
+> Otra via, si prefieres no tocar la terminal: el USB de Unraid se comparte en
+> red como `flash`, así que puedes abrir `\TU_SERVIDORlash\config\ssh\`
+> desde el Explorador de Windows y crear ahí un fichero `root.pubkeys` con tu
+> clave pública dentro. Sólo que eso **no surte efecto hasta el siguiente
+> reinicio**, porque Unraid instala ese fichero al arrancar.
 
 > **El detalle que hace que esto parezca más difícil de lo que es:** en Unraid
 > el sistema de ficheros raíz vive en RAM y se reconstruye desde el USB en cada
