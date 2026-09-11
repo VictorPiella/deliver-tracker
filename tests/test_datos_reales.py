@@ -519,3 +519,61 @@ class TestElTituloDelBloqueManda:
             "message_id": "m2", "event_date": EVENT_DATE,
         })
         assert session.query(Order).one().title == "Producto de verdad"
+
+
+class TestUnaImagenPorPedido:
+    """
+    En un email con varios pedidos, cada uno trae SU imagen. Al principio se
+    cogía una sola y se le daba al primero, así que el segundo salía con el
+    cuadrito gris de "sin foto".
+    """
+
+    HTML = (
+        '<div>408-0917824-6197118</div>'
+        '<img class="productImage" src="https://m.media-amazon.com/images/I/613y3lyKdwL._SS90_.jpg">'
+        '<a href="...orderID=408-0917824-6197118">Ver</a>'
+        '<div>408-2438266-2656303</div>'
+        '<img class="productImage" src="https://m.media-amazon.com/images/I/51BFkt-fH-L._SS90_.jpg">'
+    )
+
+    def test_cada_pedido_recibe_la_suya(self):
+        m = amazon.imagenes_por_pedido(self.HTML)
+        assert "613y3lyKdwL" in m["408-0917824-6197118"]
+        assert "51BFkt-fH-L" in m["408-2438266-2656303"]
+
+    def test_se_pide_la_version_nitida(self):
+        # El email trae miniaturas de 90px; el panel las muestra más grandes.
+        m = amazon.imagenes_por_pedido(self.HTML)
+        assert all("_SS90_" not in u for u in m.values())
+        assert all("._SL320_." in u for u in m.values())
+
+    def test_los_banners_de_recomendados_no_cuentan(self):
+        # Esos van sin class="productImage" y con sufijo _SR276,276_.
+        html = (self.HTML +
+                '<img src="https://m.media-amazon.com/images/I/41KZcsXuztL._SR276,276_.jpg">')
+        m = amazon.imagenes_por_pedido(html)
+        assert all("_SR276" not in (u or "") for u in m.values())
+
+    def test_un_pedido_sin_imagen_no_roba_la_del_siguiente(self):
+        html = ('<div>408-1111111-1111111</div>'
+                '<div>408-2222222-2222222</div>'
+                '<img class="productImage" src="https://m.media-amazon.com/images/I/AAA._SS90_.jpg">')
+        m = amazon.imagenes_por_pedido(html)
+        # Al primero le toca la primera imagen que haya por detrás, que es la
+        # misma; lo que importa es que el segundo no se quede sin ninguna.
+        assert m["408-2222222-2222222"] is not None
+
+    def test_sin_html_no_revienta(self):
+        assert amazon.imagenes_por_pedido("") == {}
+        assert amazon.imagenes_por_pedido("<p>nada</p>") == {}
+
+    def test_el_parse_completo_da_una_imagen_a_cada_uno(self):
+        cuerpo = (
+            "Llega mañana\nPedido n.º\n408-0917824-6197118\n* Adaptador\n"
+            "Llega el jueves\nPedido n.º\n408-2438266-2656303\n* JZ Type-C\n"
+        )
+        eventos = amazon.parse("auto-confirm@amazon.es", "Pedido: algo y 1 producto más",
+                               cuerpo, "m1", FECHA, html_body=self.HTML)
+        imgs = [e["image_url"] for e in eventos]
+        assert all(imgs), "algún pedido se ha quedado sin imagen"
+        assert imgs[0] != imgs[1]

@@ -141,6 +141,37 @@ def extract_image_url(html_body: str = "") -> str | None:
     return None
 
 
+def imagenes_por_pedido(html_body: str = "") -> dict:
+    """
+    Empareja cada nº de pedido con SU imagen, para los emails que traen varios.
+
+    En el HTML, cada pedido va seguido de la imagen de su producto, así que a
+    cada uno le toca la primera imagen que aparece por detrás. Se empareja por
+    posición y no por orden de aparición en dos listas sueltas, para que un
+    pedido sin imagen no desplace las de los siguientes.
+
+    Ojo con qué cuenta como imagen: el email trae además banners de productos
+    recomendados (`_SR276,276_`). La clase `productImage` los deja fuera, que
+    es justo para lo que sirve.
+    """
+    if not html_body:
+        return {}
+
+    imagenes = []
+    for patron, grupo in ((PRODUCT_IMAGE_RE, 1), (PRODUCT_IMAGE_RE_ALT, 1)):
+        for m in patron.finditer(html_body):
+            imagenes.append((m.start(), _upscale_image_url(m.group(grupo))))
+    imagenes.sort()
+
+    resultado = {}
+    for m in ORDER_ID_RE.finditer(html_body):
+        order_id = m.group(1)
+        if order_id in resultado:
+            continue   # el nº se repite en los enlaces; vale la primera vez
+        resultado[order_id] = next((u for pos, u in imagenes if pos > m.start()), None)
+    return resultado
+
+
 # Fecha estimada de entrega. Amazon la escribe en el cuerpo en texto plano, con
 # varias formas seg\u00fan el env\u00edo sea un rango o un d\u00eda concreto:
 #   "Llegada entre el 6 de julio y el 7 de julio"
@@ -306,6 +337,9 @@ def parse(sender: str, subject: str, body_text: str, message_id: str, event_date
     # AliExpress; gmail_sync ya sabe tratar ambos casos.
     bloques = extraer_pedidos_del_cuerpo(body_text)
     if len(bloques) > 1:
+        # Cada pedido tiene SU imagen en el HTML. Antes se cogia una sola y se
+        # le daba al primero, asi que el segundo salia sin foto.
+        imagenes = imagenes_por_pedido(html_body)
         eventos = []
         for i, bloque in enumerate(bloques):
             eventos.append({
@@ -325,7 +359,7 @@ def parse(sender: str, subject: str, body_text: str, message_id: str, event_date
                 # aproximacion, y en un email con varios pedidos nombra solo a
                 # uno, asi que a los demas les pondria el nombre equivocado.
                 "title_preciso": bool(bloque["title"]),
-                "image_url": image_url if i == 0 else None,
+                "image_url": imagenes.get(bloque["order_id"]) or (image_url if i == 0 else None),
                 "eta": bloque["eta"],
                 # Único por pedido: si no, la deduplicación por message_id
                 # descartaría todos menos el primero.
