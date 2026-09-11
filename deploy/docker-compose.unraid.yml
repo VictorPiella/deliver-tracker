@@ -89,3 +89,10 @@ services:
       MQTT_PASSWORD: ""
       MQTT_DISCOVERY_PREFIX: "homeassistant"
     restart: unless-stopped
+
+    labels:
+      # Hace que en la pestaña Docker de Unraid el container tenga un enlace
+      # "WebUI" clicable. [IP] y [PORT:5000] los sustituye Unraid solo, asi que
+      # esto sigue valiendo aunque cambies el puerto publicado.
+      net.unraid.docker.webui: "http://[IP]:[PORT:5000]"
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/google/material-design-icons/master/png/maps/local_shipping/materialicons/48dp/2x/baseline_local_shipping_black_48dp.png"

@@ -210,6 +210,28 @@ La misma orden. Sólo se reconstruye lo que haya cambiado:
 Opciones: `-User`, `-RemoteDir`, `-Tag`, `-SkipCompose` (sólo carga la imagen).
 `Get-Help .\deploy\deploy-unraid.ps1 -Detailed` para el resto.
 
+### Integración con la interfaz de Unraid
+
+El compose trae la metadata que espera el plugin *Compose Manager*, de modo que
+el proyecto sale bien en su pestaña. Junto al `docker-compose.yml` conviene
+dejar estos tres ficheros en la carpeta del proyecto:
+
+```bash
+cd /boot/config/plugins/compose.manager/projects/deliver-tracker
+echo 'deliver-tracker' > name
+echo 'true' > autostart
+echo 'Seguimiento de paquetes de Amazon/AliExpress desde los emails de Gmail' > description
+```
+
+`autostart` hace que el stack se levante al arrancar el array. El
+`restart: unless-stopped` del compose ya cubre los reinicios del demonio de
+Docker, así que entre los dos el panel vuelve solo pase lo que pase.
+
+Las etiquetas `net.unraid.docker.webui` / `.icon` del compose hacen que en la
+pestaña *Docker* el container tenga enlace clicable e icono. Unraid sustituye
+`[IP]` y `[PORT:5000]` solo, así que siguen valiendo aunque cambies el puerto
+publicado.
+
 ### Qué queda en Unraid
 
 | Ruta | Contenido |
