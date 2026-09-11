@@ -93,45 +93,60 @@ Los breakpoints en `app/` funcionan contra el código que corre dentro del conta
 
 ## Desplegar en Unraid
 
-GitHub Actions construye la imagen en cada push y la publica en **ghcr.io**;
-Unraid sólo la descarga. La imagen se publica **únicamente si los tests pasan**,
-así que un fallo deja a Unraid con la versión anterior, que funcionaba.
+La imagen se construye **en Windows** y se empuja a Unraid por SSH. Unraid no
+compila nada y no hace falta ningún registro de imágenes.
 
+```powershell
+.\deploy\deploy-unraid.ps1 -UnraidHost 192.168.1.10
 ```
-push a GitHub → Actions (tests → build → ghcr.io) → docker compose pull en Unraid
-```
 
-### Puesta en marcha (una sola vez)
+El script hace: `docker build` → `docker save` → `scp` → `docker load` →
+`docker compose up -d`.
 
-**1. Sube el código.** El workflow se dispara solo:
+### Preparar el acceso SSH (una sola vez)
+
+**1. Genera la clave** en Windows, si no la tienes:
 
 ```bash
-git push
+ssh-keygen -t ed25519 -C "deliver-tracker-deploy"
 ```
 
-Mira la pestaña *Actions* del repo. Al terminar, el resumen del job dice qué
-etiqueta se ha publicado.
+Sin contraseña: el script tiene que poder conectarse solo.
 
-**2. Decide si el paquete es público o privado.**
+**2. Instala la pública en Unraid.** Lo más simple es la interfaz web:
+*Settings → Management Access → SSH*, y pega ahí el contenido de
+`~/.ssh/id_ed25519.pub`. Así persiste sola.
 
-En GitHub: *tu perfil → Packages → deliver-tracker → Package settings*.
-
-- **Público**: Unraid descarga sin autenticarse. La imagen sólo lleva código, no
-  credenciales — esas viven en el volumen de Unraid, nunca en la imagen.
-- **Privado**: hay que autenticarse una vez en Unraid. Crea un token en
-  *GitHub → Settings → Developer settings → Personal access tokens (classic)*
-  con el permiso `read:packages`, y en Unraid:
-
-  ```bash
-  echo "TU_TOKEN" | docker login ghcr.io -u VictorPiella --password-stdin
-  ```
-
-**3. Prepara el volumen en Unraid.** Comprueba de quién es y ajusta `PUID`/`PGID`
-en el compose si no es 99:100:
+Si prefieres la terminal, este comando la instala **y la hace persistente**
+(te pedirá la contraseña de root una vez):
 
 ```bash
-mkdir -p /mnt/user/appdata/deliver-tracker
-ls -ldn /mnt/user/appdata/deliver-tracker
+cat ~/.ssh/id_ed25519.pub | ssh root@192.168.1.10 "mkdir -p /root/.ssh /boot/config/ssh && cat >> /root/.ssh/authorized_keys && sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys && cp /root/.ssh/authorized_keys /boot/config/ssh/root.pubkeys && chmod 600 /root/.ssh/authorized_keys /boot/config/ssh/root.pubkeys && echo INSTALADA"
+```
+
+> **El detalle que hace que esto parezca más difícil de lo que es:** en Unraid
+> el sistema de ficheros raíz vive en RAM y se reconstruye desde el USB en cada
+> arranque. Una clave puesta sólo en `/root/.ssh/authorized_keys` funciona…
+> hasta el primer reinicio, y entonces deja de funcionar sin más explicación.
+> Por eso el comando de arriba la copia también a
+> `/boot/config/ssh/root.pubkeys`, que sí está en el USB y Unraid reinstala al
+> arrancar.
+
+**3. Comprueba que entra sin contraseña:**
+
+```bash
+ssh -o BatchMode=yes root@192.168.1.10 "echo conexion OK"
+```
+
+Si eso imprime `conexion OK`, ya está.
+
+### Antes del primer despliegue
+
+**Comprueba de quién es el volumen** y ajusta `PUID`/`PGID` en
+`deploy/docker-compose.unraid.yml` si no es 99:100:
+
+```bash
+ssh root@192.168.1.10 "mkdir -p /mnt/user/appdata/deliver-tracker && ls -ldn /mnt/user/appdata/deliver-tracker"
 ```
 
 > Esto importa más de lo que parece. La imagen crea su usuario con uid 1000,
@@ -143,61 +158,56 @@ ls -ldn /mnt/user/appdata/deliver-tracker
 > `chown -R 1000:1000` no vale como alternativa, porque la herramienta *Docker
 > Safe New Permissions* de Unraid lo revertiría.
 
-**4. Copia las credenciales de Gmail** al volumen (no van en la imagen):
+**Copia las credenciales de Gmail** al volumen (no van dentro de la imagen):
 
-```powershell
-scp data\credentials.json data\token.json root@TU_IP:/mnt/user/appdata/deliver-tracker/
+```bash
+scp data/credentials.json data/token.json root@192.168.1.10:/mnt/user/appdata/deliver-tracker/
 ```
 
-**5. Coloca el compose y arranca.** Copia `deploy/docker-compose.unraid.yml` a
-Unraid como `docker-compose.yml` — por ejemplo en
-`/boot/config/plugins/compose.manager/projects/deliver-tracker/` si usas el
-plugin *Compose Manager*, o donde prefieras si lo lanzas por SSH. **Edita
-`FLASK_SECRET_KEY`** antes de levantarlo:
+**Despliega:**
+
+```powershell
+.\deploy\deploy-unraid.ps1 -UnraidHost 192.168.1.10
+```
+
+La primera vez copia también el compose. **Edita entonces `FLASK_SECRET_KEY`**
+en Unraid (el script no vuelve a sobrescribir ese fichero, justo para no pisar
+lo que edites allí):
 
 ```bash
 python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-```bash
-docker compose pull && docker compose up -d
-```
-
-El panel queda en `http://TU_IP:5000`.
+El panel queda en `http://192.168.1.10:5000`.
 
 ### Actualizar
 
-Cada vez que quieras llevarte los cambios:
+La misma orden. Sólo se reconstruye lo que haya cambiado:
 
-```bash
-git push                                    # en Windows; Actions publica la imagen
+```powershell
+.\deploy\deploy-unraid.ps1 -UnraidHost 192.168.1.10
 ```
 
-```bash
-docker compose pull && docker compose up -d  # en Unraid
-```
-
-Sólo se descargan las capas que hayan cambiado, así que una actualización de
-código son unos pocos MB.
+Opciones: `-User`, `-RemoteDir`, `-Tag`, `-SkipCompose` (sólo carga la imagen).
+`Get-Help .\deploy\deploy-unraid.ps1 -Detailed` para el resto.
 
 ### Qué queda en Unraid
 
 | Ruta | Contenido |
 |------|-----------|
-| `<carpeta del proyecto>/docker-compose.yml` | El compose (copia de `deploy/docker-compose.unraid.yml`) |
+| `/boot/config/plugins/compose.manager/projects/deliver-tracker/docker-compose.yml` | El compose (copia de `deploy/docker-compose.unraid.yml`) |
 | `/mnt/user/appdata/deliver-tracker/` | `packages.db`, `backups/`, `credentials.json`, `token.json` — **lo único que hay que respaldar** |
 
-### Alternativa sin GitHub
+### Tests en GitHub
 
-Queda también `deploy/deploy-unraid.ps1`, que construye en Windows y empuja la
-imagen por SSH (`docker save` → `scp` → `docker load`). Sirve si algún día
-quieres desplegar algo sin pasar por GitHub, pero transfiere la imagen entera
-(~400 MB) en cada despliegue y necesita acceso SSH sin contraseña:
+`.github/workflows/publicar-imagen.yml` corre la suite en cada push, que es la
+red de seguridad que interesa aunque el despliegue se haga por SSH.
 
-```powershell
-type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh root@TU_IP "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
-.\deploy\deploy-unraid.ps1 -UnraidHost TU_IP
-```
+Ese mismo workflow puede publicar la imagen en ghcr.io, pero sólo a demanda
+(botón *Run workflow*, o una etiqueta `vX.Y.Z`). Si algún día prefieres
+desplegar con `docker compose pull` en vez de con el script, ya está todo
+hecho: cambia el `image:` del compose de Unraid a
+`ghcr.io/victorpiella/deliver-tracker:latest`.
 
 ---
 

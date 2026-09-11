@@ -1,10 +1,12 @@
-name: Publicar imagen
+name: Tests y (opcional) publicar imagen
 
-# Construye la imagen y la sube a GitHub Container Registry (ghcr.io), para que
-# Unraid sólo tenga que hacer `docker compose pull`.
+# Los TESTS corren en cada push: es la red de seguridad que interesa aunque el
+# despliegue se haga por SSH desde Windows.
 #
-# Se publica SÓLO si los tests pasan: si algo se rompe, Unraid se queda con la
-# imagen anterior, que funcionaba.
+# La publicación en ghcr.io queda a demanda (botón "Run workflow" o una etiqueta
+# vX.Y.Z), para no generar imágenes que nadie descarga. Si algún día prefieres
+# desplegar con `docker compose pull` en vez de con deploy-unraid.ps1, ya está
+# todo listo: sólo hay que cambiar el `image:` del compose de Unraid.
 on:
   push:
     branches: ["**"]
@@ -37,6 +39,8 @@ jobs:
   publicar:
     name: Construir y publicar
     needs: tests
+    # Sólo a mano o en una etiqueta de version: un push normal se queda en tests.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
