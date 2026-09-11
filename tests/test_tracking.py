@@ -55,9 +55,27 @@ class TestCorreos:
 
 
 class TestGls:
-    def test_enlaza_con_el_numero_de_seguimiento(self):
+    """
+    GLS tiene cuatro entradas de seguimiento y sólo una sirve. Las otras tres se
+    probaron contra la web real: dos redirigen a /not-found y la tercera
+    responde "'Postal code' is mandatory to this user" con cualquier número,
+    incluso desde el formulario de la propia GLS.
+    """
+
+    def test_usa_el_buscador_que_funciona(self):
         u = url_de_seguimiento("gls", "1349764642", None, "1349764642")
-        assert u == "https://mygls.gls-spain.es/e/1349764642"
+        assert u == ("https://gls-group.com/ES/es/seguimiento-envio/"
+                     "?match=1349764642&international=1")
+
+    def test_no_apunta_a_las_entradas_rotas(self):
+        u = url_de_seguimiento("gls", None, None, "1349764642")
+        assert "mygls.gls-spain.es" not in u
+        assert "tracking_code.php" not in u
+
+    def test_no_hace_falta_codigo_postal(self):
+        # El formulario de su web lo pide, pero esta entrada no: el enlace se
+        # construye sólo con el nº de seguimiento.
+        assert url_de_seguimiento("gls", None, None, "1349764642") is not None
 
     def test_sin_numero_no_hay_enlace(self):
         assert url_de_seguimiento("gls", None, None, None) is None

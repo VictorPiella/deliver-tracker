@@ -48,14 +48,23 @@ def url_de_seguimiento(source: str, order_id: str | None,
         return None
 
     if source == "gls":
-        # OJO: este es el ÚNICO que no está sacado de un email. GLS sólo mete
-        # enlaces de redirección opacos (click.comunicaciones.gls-spain.com),
-        # distintos en cada correo, que no sirven para construir nada estable.
-        # Éste es su buscador público; si algún día deja de funcionar, es el
-        # primer sitio donde mirar.
+        # GLS no mete en sus emails ningún enlace reutilizable: sólo
+        # redirecciones opacas (click.comunicaciones.gls-spain.com) distintas en
+        # cada correo. Así que hay que usar su buscador público.
+        #
+        # De las cuatro entradas que tiene GLS, ésta es la que funciona:
+        #   - mygls.gls-spain.es/e/<nº>            -> redirige a /not-found
+        #   - mygls.gls-spain.es/e/?codigo=&cpDst= -> redirige a /not-found
+        #   - .../trackin-gls/inc/tracking_code.php -> su propia web da
+        #     "'Postal code' is mandatory to this user" con cualquier número;
+        #     está roto del lado de GLS, no es cosa de los parámetros
+        #   - ésta, que carga la página y lanza la búsqueda con el número
+        #
+        # Y no necesita código postal, que era justo lo que la parecía pedir el
+        # formulario de su web.
         numero = tracking_number or package_id
         if numero:
-            return f"https://mygls.gls-spain.es/e/{numero}"
+            return f"https://gls-group.com/ES/es/seguimiento-envio/?match={numero}&international=1"
         return None
 
     return None
