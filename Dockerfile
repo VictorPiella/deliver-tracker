@@ -34,12 +34,22 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 COPY scripts/ ./scripts/
 
-# Usuario sin privilegios. UID/GID 1000 coincide con el usuario habitual de
-# Unraid, así que los ficheros que el container crea en /data quedan accesibles
-# desde el share sin pelearse con permisos.
+# Usuario sin privilegios con el que corre la app. Su uid/gid se ajusta en
+# arranque a PUID/PGID: en Unraid el share appdata es de nobody:users (99:100),
+# y con uid 1000 el container no podría escribir la base ni reescribir
+# token.json al refrescar el token de Gmail.
 RUN useradd --create-home --uid 1000 --shell /bin/bash tracker \
     && mkdir -p /data \
     && chown -R tracker:tracker /data /srv
+
+ENV PUID=1000 \
+    PGID=1000
+
+# El entrypoint arranca como root, ajusta el usuario y BAJA privilegios con
+# setpriv antes de ejecutar el comando: la app nunca corre como root.
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # La base de datos vive en /data, montado como volumen persistente desde
 # Unraid (o Docker Desktop en Windows) para que sobreviva reinicios del container.
@@ -62,8 +72,6 @@ FROM base AS dev
 COPY requirements-dev.txt .
 RUN pip install --no-cache-dir -r requirements-dev.txt
 
-USER tracker
-
 # Silencia el aviso de debugpy sobre validación de ficheros .pyc.
 ENV PYDEVD_DISABLE_FILE_VALIDATION=1
 
@@ -75,8 +83,6 @@ CMD ["python", "-Xfrozen_modules=off", "-m", "scripts.devserver"]
 
 # ---------------------------------------------------------------- prod
 FROM base AS prod
-
-USER tracker
 
 # --workers 1 a propósito: la app usa SQLite y lleva el scheduler de APScheduler
 # dentro del proceso. Con 2+ workers habría dos schedulers sincronizando Gmail en

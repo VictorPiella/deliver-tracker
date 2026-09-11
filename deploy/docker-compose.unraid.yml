@@ -25,6 +25,15 @@ services:
       # Gmail real, credentials.json + token.json.
       - /mnt/user/appdata/deliver-tracker:/data
     environment:
+      # Usuario con el que corre la app DENTRO del container. 99:100 es
+      # nobody:users, que es de quien suele ser /mnt/user/appdata en Unraid.
+      # Sin esto el container corre con uid 1000 y no puede escribir la base ni
+      # reescribir token.json al refrescar el token de Gmail — la sincronizacion
+      # se rompe una hora despues de arrancar.
+      # Comprueba el tuyo con:  ls -ldn /mnt/user/appdata/deliver-tracker
+      PUID: "99"
+      PGID: "100"
+
       DB_PATH: /data/packages.db
       TZ: Europe/Madrid
 

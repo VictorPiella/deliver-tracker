@@ -101,6 +101,34 @@ La imagen se construye **en Windows** y se carga en Unraid por SSH. Unraid no co
 
 El script hace: `docker build` → `docker save` → `scp` → `docker load` → `docker compose up -d`.
 
+### Antes del primer despliegue
+
+1. **Acceso SSH sin contraseña** a Unraid (ver abajo).
+2. **Comprueba el dueño de appdata** y ajusta `PUID`/`PGID` en
+   `deploy/docker-compose.unraid.yml` si no es 99:100:
+
+   ```bash
+   ls -ldn /mnt/user/appdata/deliver-tracker
+   ```
+
+   > Esto importa más de lo que parece. La imagen crea su usuario con uid 1000,
+   > pero en Unraid appdata suele ser de `nobody:users` (99:100). Con el uid
+   > equivocado el container no puede escribir la base **ni reescribir
+   > `token.json` al refrescar el token de Gmail**, así que la sincronización
+   > se rompería una hora después de arrancar. El entrypoint se adapta al uid
+   > que le digas; `chown -R 1000:1000` no vale como alternativa, porque la
+   > herramienta *Docker Safe New Permissions* de Unraid lo revertiría.
+
+3. **Copia las credenciales de Gmail** al volumen persistente:
+
+   ```powershell
+   ssh root@192.168.1.10 "mkdir -p /mnt/user/appdata/deliver-tracker"
+   scp data\credentials.json data	oken.json root@192.168.1.10:/mnt/user/appdata/deliver-tracker/
+   ```
+
+4. **Cambia `FLASK_SECRET_KEY`** en el compose remoto (el script no lo
+   sobrescribe si ya existe, justo para no pisar lo que edites allí).
+
 **Requisito previo:** acceso SSH sin contraseña a Unraid.
 
 ```powershell
@@ -385,6 +413,7 @@ Se leen de `.env` (copia `.env.example`).
 | `BACKUP_ENABLED` | `true` | Copia diaria de la base en `<volumen>/backups` |
 | `BACKUP_KEEP` | `7` | Cuántas copias se conservan |
 | `PANEL_USER` / `PANEL_PASSWORD` | `admin` / _(vacío)_ | Con contraseña puesta, el panel pide autenticación básica |
+| `PUID` / `PGID` | `1000` / `1000` | Usuario con el que corre la app. En Unraid, **99/100** |
 | `MQTT_ENABLED` | `false` | `true` para publicar a Home Assistant |
 | `MQTT_HOST` | `localhost` | Host del broker MQTT |
 | `MQTT_PORT` | `1883` | Puerto del broker MQTT |
