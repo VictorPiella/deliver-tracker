@@ -133,3 +133,29 @@ class TestAppFactory:
         destino = tmp_path / "nueva" / "carpeta" / "packages.db"
         create_app(db_path=str(destino), use_mock_gmail=True, enable_worker=False)
         assert destino.parent.is_dir()
+
+
+class TestNombreDeLaApp:
+    """
+    El nombre visible vive en tres sitios (pestaña, cabecera, device de HA);
+    estos tests evitan que se queden desparejados al renombrar.
+    """
+
+    NOMBRE = "Delivery Tracker"
+
+    def test_en_la_pestaña_y_en_la_cabecera(self, client):
+        html = client.get("/").get_data(as_text=True)
+        assert f"· {self.NOMBRE}</title>" in html
+        assert f'class="brand-name">{self.NOMBRE}<' in html
+
+    def test_tambien_en_la_pagina_de_detalle(self, client, db_path):
+        sembrar(db_path)
+        pkg_id = client.get("/api/packages").get_json()[0]["id"]
+        assert self.NOMBRE in client.get(f"/package/{pkg_id}").get_data(as_text=True)
+
+    def test_el_device_de_home_assistant(self):
+        from app.mqtt_publish import DEVICE
+        assert DEVICE["name"] == self.NOMBRE
+        # El identificador NO sigue al nombre: cambiarlo crearía un device nuevo
+        # en HA y dejaría huérfanas las entidades existentes.
+        assert DEVICE["identifiers"] == ["deliver_tracker"]

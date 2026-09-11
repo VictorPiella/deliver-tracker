@@ -220,3 +220,42 @@ class TestIngestCarrierEvent:
         }
         assert ingest_carrier_event(session, carrier, courier="gls") is True
         assert ingest_carrier_event(session, carrier, courier="gls") is False
+
+
+class TestQueryDeBusqueda:
+    """
+    Qué le pide exactamente el escaneo a Gmail. Si se añade una tienda o un
+    transportista, esto debería fallar hasta actualizarlo a conciencia.
+    """
+
+    def test_cubre_los_cuatro_remitentes_de_amazon(self):
+        from app.gmail_sync import build_search_query
+        query = build_search_query(14)
+        for remitente in ("auto-confirm@amazon.es", "confirmar-envio@amazon.es",
+                          "shipment-tracking@amazon.es", "order-update@amazon.es"):
+            assert f"from:{remitente}" in query
+
+    def test_cubre_aliexpress_y_los_transportistas(self):
+        from app.gmail_sync import build_search_query
+        query = build_search_query(14)
+        assert "from:transaction@notice.aliexpress.com" in query
+        assert "from:gls-spain.com" in query
+        assert "from:correos.com" in query
+
+    def test_no_busca_los_emails_de_devolucion(self):
+        # El parser los ignora, así que ni se piden: menos llamadas a la API.
+        from app.gmail_sync import build_search_query
+        assert "devolucion@amazon.es" not in build_search_query(14)
+
+    def test_acota_por_fecha(self):
+        from app.gmail_sync import build_search_query
+        assert build_search_query(10).endswith("newer_than:10d")
+        assert build_search_query(14).endswith("newer_than:14d")
+
+    def test_el_primer_escaneo_mira_menos_atras_que_los_siguientes(self):
+        # Primer escaneo acotado para no importar años de historial de golpe;
+        # después, ventana más ancha por si el worker estuvo parado.
+        from app.gmail_sync import FIRST_SCAN_DAYS, LOOKBACK_DAYS, SYNC_INTERVAL_MINUTES
+        assert FIRST_SCAN_DAYS < LOOKBACK_DAYS
+        # La ventana tiene que cubrir de sobra el intervalo del worker.
+        assert LOOKBACK_DAYS * 24 * 60 > SYNC_INTERVAL_MINUTES * 4

@@ -1,4 +1,4 @@
-# deliver-tracker
+# Delivery Tracker
 
 Panel web de seguimiento de pedidos de Amazon y AliExpress, construido alrededor de los **emails de notificación de Gmail** — sin depender de 17track, sin scraping de webs de courier, sin APIs de pago.
 
@@ -16,6 +16,12 @@ Gmail → parsers → SQLite → Flask UI
 4. El **panel Flask** muestra todos los paquetes con su estado actual, barra de progreso y timeline de eventos.
 
 Todo corre en **un único container**: servidor web, worker y base de datos. No hace falta orquestar nada más.
+
+> La app se llama **Delivery Tracker** (es lo que se ve en el panel y en Home Assistant).
+> Los identificadores técnicos — el repo, la imagen, el servicio de compose, el
+> container y la ruta de datos en Unraid — siguen siendo `deliver-tracker`: son la
+> identidad con la que Docker y HA reconocen las cosas, y cambiarlos obligaría a
+> mover `/mnt/user/appdata/deliver-tracker` y recrear las entidades de HA.
 
 ## Stack
 
@@ -197,7 +203,7 @@ No hace falta activar nada: ambos parsers corren siempre que el sync corre.
 
 ## Integración con Home Assistant (MQTT)
 
-Cada paquete se publica como sensor vía [MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#discovery), agrupado bajo un device "Deliver Tracker". El `state` es el status normalizado (p.ej. `out_for_delivery`) y los atributos JSON traen título, transportista, tracking number y última actualización — útil para automatizaciones tipo *"avísame cuando algo pase a En reparto"*.
+Cada paquete se publica como sensor vía [MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#discovery), agrupado bajo un device "Delivery Tracker". El `state` es el status normalizado (p.ej. `out_for_delivery`) y los atributos JSON traen título, transportista, tracking number y última actualización — útil para automatizaciones tipo *"avísame cuando algo pase a En reparto"*.
 
 Desactivado por defecto. Pon `MQTT_ENABLED=true` y apunta `MQTT_HOST` al broker de HA. Se publica tras cada sync (manual o del worker) y la entidad se retira al borrar un paquete.
 

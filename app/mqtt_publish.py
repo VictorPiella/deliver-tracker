@@ -3,7 +3,7 @@ mqtt_publish.py — publica el estado de cada paquete a Home Assistant vía
 MQTT Discovery (https://www.home-assistant.io/integrations/mqtt/#discovery).
 
 Cada paquete se expone como un sensor HA agrupado bajo un único "device"
-("Deliver Tracker"), con:
+("Delivery Tracker"), con:
   - un topic de config (retained) que HA lee para crear la entidad automáticamente,
   - un topic de estado (retained) con el status normalizado (p.ej. "out_for_delivery"),
   - un topic de atributos JSON (retained) con título, transportista, tracking, etc.
@@ -24,9 +24,14 @@ MQTT_USERNAME = os.environ.get("MQTT_USERNAME") or None
 MQTT_PASSWORD = os.environ.get("MQTT_PASSWORD") or None
 MQTT_DISCOVERY_PREFIX = os.environ.get("MQTT_DISCOVERY_PREFIX", "homeassistant")
 
+# 'name' es lo que se ve en Home Assistant; 'identifiers' y los topics de abajo
+# son la identidad técnica con la que HA reconoce el device y sus entidades.
+# Por eso el nombre cambia con el de la app pero los identificadores NO: tocarlos
+# haría que HA creara un device nuevo y dejara huérfanas las entidades y las
+# automatizaciones que las usen.
 DEVICE = {
     "identifiers": ["deliver_tracker"],
-    "name": "Deliver Tracker",
+    "name": "Delivery Tracker",
     "manufacturer": "deliver-tracker",
 }
 
