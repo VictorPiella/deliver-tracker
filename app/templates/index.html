@@ -47,10 +47,11 @@
 {% for p in packages %}
 <article class="pkg"
          data-delivered="{{ 'si' if p.status in ('delivered', 'cancelled') else 'no' }}"
-         data-search="{{ ((p.title or '') ~ ' ' ~ (p.external_package_id or '') ~ ' ' ~ (p.courier_tracking_number or '') ~ ' ' ~ p.source)|lower }}">
+         data-search="{{ ((p.title or '') ~ ' ' ~ (p.titulo_email or '') ~ ' ' ~ (p.external_package_id or '') ~ ' ' ~ (p.courier_tracking_number or '') ~ ' ' ~ p.source)|lower }}">
 
   <div class="pkg-main">
-    <div class="thumb-wrap">
+    <a class="thumb-wrap" href="{{ url_for('package_detail', package_id=p.id) }}"
+       title="Ver el detalle y el histórico" aria-label="Ver el detalle">
       {% if p.image_url %}
       <img class="thumb" src="{{ p.image_url }}" alt="" loading="lazy"
            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
@@ -58,12 +59,39 @@
       {% else %}
       <div class="thumb thumb-fallback {{ p.source }}">{{ p.source[:2]|upper }}</div>
       {% endif %}
-    </div>
+    </a>
 
     <div class="pkg-body">
-      <a class="pkg-title" href="{{ url_for('package_detail', package_id=p.id) }}">
-        {{ p.title or '(sin nombre de producto)' }}
-      </a>
+      <div class="pkg-title-fila">
+        <a class="pkg-title" href="{{ url_for('package_detail', package_id=p.id) }}">
+          {{ p.title or '(sin nombre de producto)' }}
+        </a>
+        <button type="button" class="btn-lapiz" title="Ponerle otro nombre"
+                aria-label="Ponerle otro nombre" data-renombrar="{{ p.id }}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+          </svg>
+        </button>
+        <a class="btn-lapiz btn-detalle" href="{{ url_for('package_detail', package_id=p.id) }}"
+           title="Ver el detalle y el histórico" aria-label="Ver el detalle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="m9 18 6-6-6-6"/>
+          </svg>
+        </a>
+      </div>
+
+      <form class="rename-form" id="rename-{{ p.id }}" hidden method="POST"
+            action="{{ url_for('rename_package_route', package_id=p.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="text" name="alias" maxlength="120" autocomplete="off"
+               value="{{ p.alias or '' }}"
+               placeholder="{{ p.titulo_email or 'Ponle un nombre' }}"
+               aria-label="Nombre del paquete">
+        <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-cancelar="{{ p.id }}">Cancelar</button>
+      </form>
       <div class="pkg-meta">
         <span class="chip chip-{{ p.source }}">{{ p.source }}</span>
         <span class="mono">#{{ p.external_package_id }}</span>
@@ -165,6 +193,40 @@
 {% endif %}
 
 <script>
+  // Renombrar desde la lista: el titulo que sale del email es a veces un churro
+  // de referencias, y asi le pones "la tarjeta Revolut" y se acabo.
+  (function () {
+    function form(id) { return document.getElementById('rename-' + id); }
+
+    document.querySelectorAll('[data-renombrar]').forEach(function (boton) {
+      boton.addEventListener('click', function () {
+        var f = form(boton.dataset.renombrar);
+        if (!f) return;
+        // Se cierra cualquier otro que estuviera abierto.
+        document.querySelectorAll('.rename-form:not([hidden])').forEach(function (otro) {
+          if (otro !== f) otro.hidden = true;
+        });
+        f.hidden = !f.hidden;
+        if (!f.hidden) { var i = f.querySelector('input[name=alias]'); i.focus(); i.select(); }
+      });
+    });
+
+    document.querySelectorAll('[data-cancelar]').forEach(function (boton) {
+      boton.addEventListener('click', function () {
+        var f = form(boton.dataset.cancelar);
+        if (f) { f.hidden = true; f.reset(); }
+      });
+    });
+
+    // Escape cierra sin guardar.
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      document.querySelectorAll('.rename-form:not([hidden])').forEach(function (f) {
+        f.hidden = true; f.reset();
+      });
+    });
+  })();
+
   // GLS no admite enlace directo: su buscador pide el nº de envío y el código
   // postal a mano. Al menos el número va al portapapeles de camino, para no
   // tener que ir a buscarlo.

@@ -75,6 +75,21 @@
 
     <div class="detail-headings">
       <h1>{{ package.title or '(sin nombre de producto)' }}</h1>
+
+      <form class="rename-detalle" method="POST"
+            action="{{ url_for('rename_package_route', package_id=package.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="text" name="alias" maxlength="120" autocomplete="off"
+               value="{{ package.alias or '' }}"
+               placeholder="{{ package.titulo_email or 'Ponle un nombre' }}"
+               aria-label="Nombre del paquete">
+        <button type="submit" class="btn btn-ghost btn-sm">
+          {{ 'Cambiar nombre' if package.alias else 'Ponerle nombre' }}
+        </button>
+      </form>
+      {% if package.alias and package.titulo_email %}
+      <p class="nombre-original">Nombre del email: {{ package.titulo_email }}</p>
+      {% endif %}
       <div class="detail-badges">
         <span class="badge badge-{{ package.status }}">
           {{ package.status_label }}

@@ -256,7 +256,9 @@ def register_routes(app: Flask) -> None:
             "id": p.id,
             "source": p.source,
             "external_package_id": p.external_package_id,
-            "title": p.order.title if p.order else None,
+            "title": p.alias or (p.order.title if p.order else None),
+            "alias": p.alias,
+            "titulo_email": p.order.title if p.order else None,
             "image_url": p.order.image_url if p.order else None,
             "status": p.status,
             "status_label": STATUS_LABELS_ES.get(p.status, p.status),
@@ -313,7 +315,9 @@ def register_routes(app: Flask) -> None:
             "id": p.id,
             "source": p.source,
             "external_package_id": p.external_package_id,
-            "title": p.order.title if p.order else None,
+            "title": p.alias or (p.order.title if p.order else None),
+            "alias": p.alias,
+            "titulo_email": p.order.title if p.order else None,
             "image_url": p.order.image_url if p.order else None,
             "order_external_id": p.order.external_order_id if p.order else None,
             "status": p.status,
@@ -359,12 +363,20 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/api/packages")
     def api_packages():
-        packages = g.db.query(Package).filter(Package.deleted_at.is_(None)).all()
+        # Mismo orden que el panel: sin ordenar, SQLite los devolvia por id y
+        # la API y la pagina no coincidian.
+        packages = (
+            g.db.query(Package)
+            .filter(Package.deleted_at.is_(None))
+            .order_by(Package.last_updated.desc())
+            .all()
+        )
         return jsonify([{
             "id": p.id,
             "source": p.source,
             "external_package_id": p.external_package_id,
-            "title": p.order.title if p.order else None,
+            "title": p.alias or (p.order.title if p.order else None),
+            "alias": p.alias,
             "status": p.status,
             "status_label": STATUS_LABELS_ES.get(p.status, p.status),
             "status_is_manual": p.status_is_manual,
@@ -511,6 +523,24 @@ def register_routes(app: Flask) -> None:
             return redirect(request.referrer or url_for("index"))
 
         publish_all_packages(current_app.config["DB_PATH"])
+        return redirect(request.referrer or url_for("index"))
+
+    @app.route("/package/<int:package_id>/rename", methods=["POST"])
+    def rename_package_route(package_id):
+        """
+        Le pone nombre a un paquete desde el panel. Enviar el campo vacío quita
+        el alias y devuelve el título que venga del email.
+        """
+        p = g.db.get(Package, package_id)
+        if p is None:
+            return "Paquete no encontrado", 404
+
+        alias = (request.form.get("alias") or "").strip()[:120]
+        p.alias = alias or None
+        g.db.commit()
+        publish_all_packages(current_app.config["DB_PATH"])
+        flash(f"Renombrado a «{alias}»." if alias else "Nombre devuelto al del email.",
+              "success")
         return redirect(request.referrer or url_for("index"))
 
     @app.route("/package/<int:package_id>/merge", methods=["POST"])

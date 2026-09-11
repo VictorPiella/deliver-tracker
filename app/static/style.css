@@ -616,7 +616,9 @@ main {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pkg-title:hover { color: var(--accent); }
+/* Subrayado al pasar por encima: sin el, el titulo no parecia pinchable y no
+   se encontraba la forma de entrar al detalle. */
+.pkg-title:hover { color: var(--accent); text-decoration: underline; }
 
 .pkg-meta {
   display: flex;
@@ -1168,3 +1170,87 @@ main {
 @media (max-width: 760px) {
   .aviso-copiado { right: 12px; left: 12px; bottom: 12px; text-align: center; }
 }
+
+
+/* --------------------------------------------------- renombrar un paquete */
+
+/* El lapiz solo aparece al pasar por encima de la fila: esta siempre ahi, pero
+   sin competir por la atencion con el nombre del producto. */
+.pkg-title-fila { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pkg-title-fila .pkg-title { min-width: 0; }
+
+.btn-lapiz {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.btn-lapiz svg { width: 13px; height: 13px; }
+.pkg:hover .btn-lapiz,
+.btn-lapiz:focus-visible { opacity: 1; }
+.btn-lapiz:hover { color: var(--accent); background: var(--surface-2); }
+
+/* En tactil no hay hover: ahi se deja siempre visible. */
+@media (hover: none) {
+  .btn-lapiz { opacity: 1; }
+}
+
+.rename-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.rename-form[hidden] { display: none; }
+
+.rename-form input[type="text"],
+.rename-detalle input[type="text"] {
+  flex: 1;
+  min-width: 160px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 7px 10px;
+}
+.rename-form input:focus,
+.rename-detalle input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.rename-detalle {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 12px;
+  max-width: 480px;
+}
+
+.nombre-original {
+  margin: -6px 0 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+
+/* La miniatura tambien entra al detalle: objetivo grande y facil de acertar. */
+a.thumb-wrap { display: block; text-decoration: none; border-radius: var(--r); }
+a.thumb-wrap:hover .thumb { border-color: var(--accent); }
+
+/* El chevron de "ver detalle", junto al lapiz. */
+.btn-detalle { text-decoration: none; }
+.btn-detalle:hover { color: var(--accent); background: var(--surface-2); }

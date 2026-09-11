@@ -57,6 +57,13 @@ class Package(Base):
     # volvia a crearlo. Marcandolo aqui, los eventos se conservan (el email ya
     # no se reingiere) y ademas el borrado es reversible desde la papelera.
     deleted_at = Column(DateTime, index=True)
+    # Nombre que le pones tú desde el panel. Manda sobre el título que sacamos
+    # del email, que a veces es un churro de referencias ilegible. Vive en el
+    # Package y no en el Order a propósito: renombras la fila que estás viendo,
+    # y un pedido partido en dos envíos puede querer dos nombres distintos.
+    # Además la sincronización sólo escribe Order.title, así que un alias nunca
+    # se pisa al escanear.
+    alias = Column(String)
     eta = Column(String)                                # fecha estimada de entrega (texto libre del email)
     # SIN onupdate a proposito. Con el, CUALQUIER escritura en la fila reescribia
     # la fecha: restaurar un paquete de la papelera, aprender su transportista o
@@ -253,6 +260,8 @@ _MIGRATIONS = [
      "ALTER TABLE packages ADD COLUMN status_is_manual BOOLEAN NOT NULL DEFAULT 0"),
     ("packages", "deleted_at",
      "ALTER TABLE packages ADD COLUMN deleted_at DATETIME"),
+    ("packages", "alias",
+     "ALTER TABLE packages ADD COLUMN alias VARCHAR"),
 ]
 
 
