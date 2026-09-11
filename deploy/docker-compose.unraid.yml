@@ -19,7 +19,10 @@ services:
     image: deliver-tracker:latest
     container_name: deliver-tracker
     ports:
-      - "5000:5000"
+      # 5000 en el host ya lo ocupa Frigate, asi que el panel sale por 5055.
+      # Dentro del container sigue siendo 5000 (es donde escucha gunicorn y
+      # donde apunta el HEALTHCHECK): solo cambia la parte de fuera.
+      - "5055:5000"
     volumes:
       # Único directorio que hay que respaldar: contiene packages.db y, si usas
       # Gmail real, credentials.json + token.json.
