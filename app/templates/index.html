@@ -19,7 +19,7 @@
 </section>
 
 <div class="list-bar">
-  <span class="last-sync" {% if ultimo_escaneo %}title="{{ ultimo_escaneo.strftime('%d/%m/%Y %H:%M') }} UTC"{% endif %}>
+  <span class="last-sync" {% if ultimo_escaneo %}title="{{ ultimo_escaneo|local('%d/%m/%Y %H:%M') }}"{% endif %}>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
@@ -81,11 +81,14 @@
     <div class="progress" aria-hidden="true">
       <div class="progress-bar bar-{{ p.status }}" style="width: {{ p.progress_pct }}%;"></div>
     </div>
+    {% if p.eta and p.status != 'delivered' %}
+    <span class="eta" title="Fecha estimada de entrega, según el email">Llega {{ p.eta }}</span>
+    {% endif %}
   </div>
 
   <div class="pkg-date">
-    <span class="date-main">{{ p.last_updated.strftime('%d %b') if p.last_updated else '—' }}</span>
-    <span class="date-sub">{{ p.last_updated.strftime('%Y · %H:%M') if p.last_updated else '' }}</span>
+    <span class="date-main">{{ p.last_updated|local('%d %b') }}</span>
+    <span class="date-sub">{{ p.last_updated|local('%Y · %H:%M') if p.last_updated else '' }}</span>
   </div>
 
   <div class="pkg-actions">
@@ -104,8 +107,8 @@
     </form>
 
     <form method="POST" action="{{ url_for('delete_package_route', package_id=p.id) }}"
-          onsubmit="return confirm('¿Eliminar «{{ (p.title or p.external_package_id)|replace("'", "") }}»?\n\nSe borra también su histórico de eventos. No se puede deshacer.');">
-      <button type="submit" class="icon-btn icon-btn-danger" title="Eliminar paquete" aria-label="Eliminar paquete">
+          onsubmit="return confirm('¿Mover «{{ (p.title or p.external_package_id)|replace("'", "") }}» a la papelera?\n\nPodrás recuperarlo desde la papelera.');">
+      <button type="submit" class="icon-btn icon-btn-danger" title="Mover a la papelera" aria-label="Mover a la papelera">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
              stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>

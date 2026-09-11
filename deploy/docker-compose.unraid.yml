@@ -38,6 +38,24 @@ services:
       GMAIL_MAX_LOOKBACK_DAYS: "365"
       SYNC_INTERVAL_MINUTES: "60"
 
+      # Hora que se MUESTRA en el panel (lo guardado siempre es UTC).
+      DISPLAY_TZ: "Europe/Madrid"
+
+      # Los paquetes entregados se van solos a la papelera pasados estos dias.
+      # NO se borran: siguen recuperables. 0 desactiva el archivado.
+      PURGE_DELIVERED_AFTER_DAYS: "30"
+
+      # Copia diaria de la base en /mnt/user/appdata/deliver-tracker/backups.
+      # La base es la unica copia duradera del historico: los emails de origen
+      # puede que ya no existan.
+      BACKUP_ENABLED: "true"
+      BACKUP_KEEP: "7"
+
+      # Contrasena del panel. Dejala vacia si solo se accede desde la LAN;
+      # rellenala si lo publicas detras de un proxy inverso.
+      PANEL_USER: "admin"
+      PANEL_PASSWORD: ""
+
       # false = Gmail real. Requiere credentials.json y token.json dentro de
       # /mnt/user/appdata/deliver-tracker/ (ver README, "Conectar Gmail real").
       # Ponlo en true para arrancar con datos de ejemplo y comprobar que el

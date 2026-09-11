@@ -27,14 +27,14 @@
     </form>
 
     <form method="POST" action="{{ url_for('delete_package_route', package_id=package.id) }}"
-          onsubmit="return confirm('¿Eliminar este paquete?\n\nSe borra también su histórico de eventos. No se puede deshacer.');">
+          onsubmit="return confirm('¿Mover este paquete a la papelera?\n\nPodrás recuperarlo desde la papelera.');">
       <button type="submit" class="btn btn-danger">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
           <path d="M10 11v6M14 11v6"/>
         </svg>
-        Eliminar
+        A la papelera
       </button>
     </form>
   </div>
@@ -75,6 +75,10 @@
       <div class="field-value mono">{{ package.order_external_id or '—' }}</div>
     </div>
     <div class="field">
+      <label>Entrega estimada</label>
+      <div class="field-value">{{ package.eta or '—' }}</div>
+    </div>
+    <div class="field">
       <label>Transportista</label>
       <div class="field-value">{{ package.courier or 'No identificado' }}</div>
     </div>
@@ -99,13 +103,39 @@
   {% endif %}
 </div>
 
+{% if candidatos %}
+<details class="merge-box">
+  <summary>¿Es el mismo envío que otro de la lista? Fusionarlos</summary>
+  <p class="merge-help">
+    Correos no incluye ningún identificador de Amazon ni de AliExpress en sus
+    emails, así que sus envíos aparecen como entrada aparte. Si sabes que este y
+    otro son el mismo paquete, aquí los unes: los eventos de este se mueven al
+    otro y esta entrada desaparece.
+  </p>
+  <form method="POST" action="{{ url_for('merge_package_route', package_id=package.id) }}"
+        class="merge-form"
+        onsubmit="return confirm('¿Fusionar este paquete con el seleccionado?
+
+Sus eventos se moverán al otro y esta entrada desaparecerá.');">
+    <div class="select-wrap">
+      <select name="target_id" aria-label="Paquete de destino">
+        {% for c in candidatos %}
+        <option value="{{ c.id }}">{{ c.etiqueta }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-ghost">Fusionar</button>
+  </form>
+</details>
+{% endif %}
+
 {% if timeline %}
 <h2 class="section-title">Histórico · {{ timeline|length }} evento{{ '' if timeline|length == 1 else 's' }}</h2>
 <div class="card">
   <ul class="timeline">
     {% for ev in timeline %}
     <li {% if loop.last %}class="is-last"{% endif %}>
-      <div class="t-date">{{ ev.event_date.strftime('%d %b %Y · %H:%M') }}</div>
+      <div class="t-date">{{ ev.event_date|local }}</div>
       <div class="t-status">{{ ev.status_label }}</div>
       <div class="t-raw">{{ ev.gmail_subject }}</div>
     </li>

@@ -152,3 +152,75 @@ class TestBorrarLosEmailsNoBorraNada:
         # Los otros se borran antes del siguiente escaneo: no aparecen nunca.
         run_sync(db_path, lambda q: mitad, mock_get_thread_fn, log=sin_log)
         assert get_session(db_path).query(PackageEvent).count() == parciales
+
+
+class TestEscaneoEnSegundoPlano:
+    """
+    El botón "Escanear" lanza el escaneo en un hilo y contesta al momento. Antes
+    corría dentro de la petición, y tras un parón largo la ventana adaptativa
+    puede pedir un año de correo: más que los 120s de timeout de gunicorn.
+    """
+
+    def test_la_peticion_contesta_sin_esperar(self, client):
+        from app.worker import wait_for_sync
+
+        import time
+
+        ESPERA = 4.0     # lo que tarda el escaneo simulado
+
+        def gmail_lento(query):
+            time.sleep(ESPERA)
+            return []
+
+        client.application.config["GMAIL_SEARCH_FN"] = gmail_lento
+
+        t0 = time.monotonic()
+        respuesta = client.post("/sync")
+        transcurrido = time.monotonic() - t0
+
+        assert respuesta.status_code == 302
+        # Margen amplio a propósito: lo que se comprueba es que NO espera los
+        # 4s del escaneo, no cuántos milisegundos tarda en responder.
+        assert transcurrido < ESPERA / 2, (
+            f"la petición tardó {transcurrido:.2f}s: parece que espera al escaneo"
+        )
+        assert wait_for_sync(30)
+
+    def test_no_se_solapan_dos_escaneos(self, db_path):
+        from app.worker import trigger_sync_now, wait_for_sync
+
+        import threading
+        arrancado = threading.Event()
+        soltar = threading.Event()
+
+        def gmail_lento(query):
+            arrancado.set()
+            soltar.wait(10)   # sin sleeps al tuntún: el test controla cuándo acaba
+            return []
+
+        assert trigger_sync_now(db_path, gmail_lento, lambda m: {}, log=lambda *a: None) is True
+        assert arrancado.wait(10), "el escaneo no llegó a arrancar"
+
+        # El segundo no arranca mientras el primero siga vivo.
+        assert trigger_sync_now(db_path, gmail_lento, lambda m: {}, log=lambda *a: None) is False
+
+        soltar.set()
+        assert wait_for_sync(30)
+
+    def test_un_fallo_queda_registrado_en_el_estado(self, db_path):
+        from app.worker import sync_state, trigger_sync_now, wait_for_sync
+
+        def gmail_roto(query):
+            raise RuntimeError("no se encontró token.json")
+
+        trigger_sync_now(db_path, gmail_roto, lambda m: {}, log=lambda *a: None)
+        assert wait_for_sync(10)
+
+        estado = sync_state()
+        assert estado["running"] is False
+        assert "token.json" in estado["last_error"]
+
+    def test_el_endpoint_de_estado_responde(self, client):
+        datos = client.get("/api/sync-status").get_json()
+        assert "running" in datos
+        assert datos["running"] is False

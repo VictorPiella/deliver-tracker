@@ -85,30 +85,68 @@ def _walk_parts(payload: dict, plaintext: list, html: list) -> None:
         _walk_parts(part, plaintext, html)
 
 
+# Gmail acepta como mucho 100 peticiones por lote.
+BATCH_SIZE = 100
+
+
+def _fetch_metadata_batch(service, ids: list) -> list:
+    """
+    Pide las cabeceras de varios mensajes en UNA sola petición HTTP.
+
+    Antes se hacía un messages().get() por mensaje, en serie: para una ventana
+    de 30 días son cientos de idas y vueltas HTTPS (decenas de segundos), y
+    tras un parón largo la ventana adaptativa puede pedir un año, con miles.
+    Con lotes de 100 son ~100 veces menos viajes.
+    """
+    resultados = {}
+    errores = []
+
+    def _callback(request_id, response, exception):
+        if exception is not None:
+            errores.append((request_id, exception))
+            return
+        headers = response.get("payload", {}).get("headers", [])
+        resultados[response["id"]] = {
+            "id": response["id"],
+            "subject": _header(headers, "Subject"),
+            "sender": _header(headers, "From"),
+            "date": _parse_date(_header(headers, "Date")),
+        }
+
+    batch = service.new_batch_http_request(callback=_callback)
+    for mid in ids:
+        batch.add(service.users().messages().get(
+            userId="me", id=mid, format="metadata",
+            metadataHeaders=["From", "Subject", "Date"],
+        ))
+    batch.execute()
+
+    if errores:
+        print(f"[gmail_oauth] {len(errores)} mensaje(s) no se pudieron leer en el lote: "
+              f"{errores[0][1]}")
+
+    # Se respeta el orden pedido; los que fallaron sencillamente no están.
+    return [resultados[mid] for mid in ids if mid in resultados]
+
+
 def gmail_search_fn(query: str) -> list:
     """Busca mensajes y devuelve {id, subject, sender, date} por cada uno."""
     service = _get_service()
-    messages = []
+
+    ids = []
     page_token = None
     while True:
         resp = service.users().messages().list(
-            userId="me", q=query, pageToken=page_token
+            userId="me", q=query, pageToken=page_token, maxResults=500
         ).execute()
-        for m in resp.get("messages", []):
-            meta = service.users().messages().get(
-                userId="me", id=m["id"], format="metadata",
-                metadataHeaders=["From", "Subject", "Date"],
-            ).execute()
-            headers = meta.get("payload", {}).get("headers", [])
-            messages.append({
-                "id": m["id"],
-                "subject": _header(headers, "Subject"),
-                "sender": _header(headers, "From"),
-                "date": _parse_date(_header(headers, "Date")),
-            })
+        ids.extend(m["id"] for m in resp.get("messages", []))
         page_token = resp.get("nextPageToken")
         if not page_token:
             break
+
+    messages = []
+    for i in range(0, len(ids), BATCH_SIZE):
+        messages.extend(_fetch_metadata_batch(service, ids[i:i + BATCH_SIZE]))
     return messages
 
 

@@ -16,6 +16,19 @@ def status_rank(status: str) -> int:
         return -1  # 'unknown' u otros no listados van antes que todo, nunca pisan nada
 
 
+def evento_anclable(event: dict) -> bool:
+    """
+    ¿Tiene el evento algún identificador al que agarrarse?
+
+    Es el sintoma tipico de una plantilla cambiada: el parser reconoce al
+    remitente y devuelve un dict, pero no ha encontrado ni order_id ni
+    package_id en el asunto, asi que el evento no se puede colgar de ningun
+    paquete. ingest_event lo descartaria en silencio; gmail_sync lo usa para
+    poder contarlo como "no reconocido" en vez de como duplicado.
+    """
+    return bool(event.get("order_id") or event.get("package_id"))
+
+
 def apply_status(package, nuevo_status: str) -> bool:
     """
     Aplica un estado venido de un email al Package, si procede. Devuelve True si
@@ -50,6 +63,65 @@ def recompute_status_from_events(package) -> str:
     return mejor.status
 
 
+def merge_packages(session, origen: Package, destino: Package) -> int:
+    """
+    Funde `origen` dentro de `destino`: le pasa sus eventos y lo elimina.
+    Devuelve cuántos eventos se han movido.
+
+    Para qué: Correos no incluye ningún ID de Amazon/AliExpress en sus emails,
+    así que un paquete repartido por Correos aparece dos veces — la entrada de
+    la tienda y la de Correos. Enlazarlas automáticamente sería adivinar (ver
+    parsers/correos.py), pero tú sí sabes cuáles son la misma, y esto te deja
+    unirlas a mano.
+
+    Los eventos se MUEVEN, no se borran: conservan su gmail_message_id, que es
+    lo que impide que el escaneo siguiente vuelva a crear el paquete de origen.
+    """
+    if origen.id == destino.id:
+        return 0
+
+    # Los eventos se reasignan con un UPDATE directo y luego se invalidan las
+    # colecciones en memoria. Si se cambiara evento.package_id sin más, el
+    # `cascade="all, delete-orphan"` de Package.events seguiría viendo los
+    # eventos colgando del origen y se los llevaría por delante al borrarlo.
+    ids = [e.id for e in origen.events]
+    movidos = len(ids)
+    if ids:
+        session.query(PackageEvent).filter(PackageEvent.id.in_(ids)).update(
+            {PackageEvent.package_id: destino.id}, synchronize_session=False
+        )
+        session.expire(origen, ["events"])
+        session.expire(destino, ["events"])
+    session.flush()
+
+    # El origen suele ser el del transportista: es el que trae el tracking real.
+    if origen.courier and not destino.courier:
+        destino.courier = origen.courier
+    if origen.courier_tracking_number and not destino.courier_tracking_number:
+        destino.courier_tracking_number = origen.courier_tracking_number
+    if origen.eta and not destino.eta:
+        destino.eta = origen.eta
+    # Y el destino suele ser el de la tienda: es el que trae nombre e imagen.
+    if origen.order and destino.order:
+        if origen.order.title and not destino.order.title:
+            destino.order.title = origen.order.title
+        if origen.order.image_url and not destino.order.image_url:
+            destino.order.image_url = origen.order.image_url
+
+    order_id_origen = origen.order_id
+    session.delete(origen)
+    session.flush()
+
+    if session.query(Package).filter_by(order_id=order_id_origen).count() == 0:
+        huerfano = session.get(Order, order_id_origen)
+        if huerfano is not None:
+            session.delete(huerfano)
+
+    if not destino.status_is_manual:
+        recompute_status_from_events(destino)
+    return movidos
+
+
 def get_or_create_order(session, source: str, external_order_id: str, title: str | None, image_url: str | None = None) -> Order:
     order = (
         session.query(Order)
@@ -69,6 +141,12 @@ def get_or_create_order(session, source: str, external_order_id: str, title: str
 
 
 def get_or_create_package(session, order: Order, source: str, external_package_id: str) -> Package:
+    """
+    Busca el paquete incluyendo los que están en la papelera, y a propósito: si
+    borraste un paquete y luego llega otro email suyo, el evento se apunta al
+    mismo paquete (que sigue en la papelera, listo por si lo restauras) en vez
+    de crear un duplicado visible que "resucita" lo que habías quitado.
+    """
     package = (
         session.query(Package)
         .filter_by(source=source, external_package_id=external_package_id)
@@ -124,6 +202,32 @@ def ingest_event(session, event: dict) -> bool:
     # para el pedido, no podemos saber a cuál pertenece con certeza, así que se usa
     # el fallback (mejor un paquete de más que mezclar datos de dos paquetes distintos).
     had_own_package_id = bool(event.get("package_id"))
+
+    # El email de "Pedido realizado" de Amazon no trae shipmentId, así que crea
+    # un paquete provisional con id 'order-<pedido>'. Cuando después llega el de
+    # "Enviado", que SÍ lo trae, se creaba un paquete NUEVO: el mismo pedido
+    # aparecía dos veces en el panel, uno clavado en "Pedido realizado" y otro
+    # avanzando. Aquí el envío real adopta el provisional y se queda su
+    # histórico, en vez de duplicarlo.
+    if had_own_package_id:
+        provisional_id = f"order-{order_id_ext}"
+        if package_id_ext != provisional_id:
+            ya_existe = (
+                session.query(Package)
+                .filter_by(source=source, external_package_id=package_id_ext)
+                .first()
+            )
+            if ya_existe is None:
+                provisional = (
+                    session.query(Package)
+                    .filter_by(source=source, external_package_id=provisional_id,
+                               order_id=order.id)
+                    .first()
+                )
+                if provisional is not None:
+                    provisional.external_package_id = package_id_ext
+                    session.flush()
+
     if not had_own_package_id:
         existing_packages = (
             session.query(Package)
@@ -157,6 +261,10 @@ def ingest_event(session, event: dict) -> bool:
         package.courier_tracking_number = event["courier_tracking_number"]
     if event.get("courier") and not package.courier:
         package.courier = event["courier"]
+    # La ETA sí se pisa cuando llega una nueva: Amazon la reajusta en cada
+    # email, y la última es la buena.
+    if event.get("eta"):
+        package.eta = event["eta"]
 
     if event.get("title") and not order.title:
         order.title = event["title"]

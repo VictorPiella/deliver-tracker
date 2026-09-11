@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Papelera{% endblock %}
+{% block content %}
+
+{% if packages %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Papelera</h1>
+    <p class="page-sub">
+      {{ packages|length }} paquete{{ '' if packages|length == 1 else 's' }} fuera del panel.
+      Su histórico sigue guardado, así que restaurarlos los devuelve tal cual estaban.
+    </p>
+  </div>
+  <form method="POST" action="{{ url_for('vaciar_papelera') }}"
+        onsubmit="return confirm('¿Vaciar la papelera?\n\nSe borrarán definitivamente {{ packages|length }} paquete(s) y su histórico. Esto sí es irreversible.');">
+    <button type="submit" class="btn btn-danger">Vaciar papelera</button>
+  </form>
+</div>
+
+<div class="list">
+{% for p in packages %}
+<article class="pkg pkg-trashed">
+  <div class="pkg-main">
+    <div class="thumb-wrap">
+      {% if p.image_url %}
+      <img class="thumb" src="{{ p.image_url }}" alt="" loading="lazy"
+           onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="thumb thumb-fallback {{ p.source }}" style="display:none">{{ p.source[:2]|upper }}</div>
+      {% else %}
+      <div class="thumb thumb-fallback {{ p.source }}">{{ p.source[:2]|upper }}</div>
+      {% endif %}
+    </div>
+    <div class="pkg-body">
+      <span class="pkg-title">{{ p.title or '(sin nombre de producto)' }}</span>
+      <div class="pkg-meta">
+        <span class="chip chip-{{ p.source }}">{{ p.source }}</span>
+        <span class="mono">#{{ p.external_package_id }}</span>
+        <span class="dot">·</span>
+        <span class="nowrap">{{ p.n_events }} evento{{ '' if p.n_events == 1 else 's' }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="pkg-status">
+    <span class="badge badge-{{ p.status }}">{{ p.status_label }}</span>
+  </div>
+
+  <div class="pkg-date">
+    <span class="date-main">Borrado</span>
+    <span class="date-sub">{{ p.deleted_at|local('%d %b · %H:%M') }}</span>
+  </div>
+
+  <div class="pkg-actions">
+    <form method="POST" action="{{ url_for('restore_package_route', package_id=p.id) }}">
+      <button type="submit" class="btn btn-ghost btn-sm">Restaurar</button>
+    </form>
+    <form method="POST" action="{{ url_for('purge_package_route', package_id=p.id) }}"
+          onsubmit="return confirm('¿Borrar definitivamente?\n\nSe pierde el histórico. Si los emails de origen siguen en Gmail dentro de la ventana de búsqueda, el paquete volverá a aparecer en el próximo escaneo.');">
+      <button type="submit" class="icon-btn icon-btn-danger" title="Borrar definitivamente" aria-label="Borrar definitivamente">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+          <path d="M10 11v6M14 11v6"/>
+        </svg>
+      </button>
+    </form>
+  </div>
+</article>
+{% endfor %}
+</div>
+
+{% else %}
+<div class="empty">
+  <div class="empty-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+    </svg>
+  </div>
+  <div class="empty-title">Papelera vacía</div>
+  <p>Los paquetes que borres del panel aparecerán aquí, y podrás recuperarlos.</p>
+</div>
+{% endif %}
+
+{% endblock %}

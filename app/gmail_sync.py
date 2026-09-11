@@ -33,9 +33,11 @@ Gmail vía OAuth — ver NOTA_PRODUCCION abajo).
 import os
 from datetime import datetime
 
-from .models import get_last_sync, get_session, set_last_sync, Package
+from .models import (
+    get_last_sync, get_session, set_last_sync, Package, UnparsedEmail,
+)
 from .timeutils import utcnow, to_utc_naive
-from .sync import ingest_event, ingest_carrier_event
+from .sync import evento_anclable, ingest_event, ingest_carrier_event
 from .parsers import amazon, aliexpress, gls, correos
 
 # --- Configuración ---
@@ -122,6 +124,24 @@ def parse_event_date(date_str: str) -> datetime:
         return utcnow()
 
 
+def record_unparsed(session, message_id: str, sender: str, subject: str, event_date) -> None:
+    """
+    Apunta un email de un remitente conocido que ningún parser ha sabido leer.
+    Es la única forma de enterarse de que Amazon o AliExpress han cambiado la
+    plantilla: sin esto, parse() devuelve None, el contador de "saltados" sube
+    y dejas de ver paquetes sin ninguna señal.
+    """
+    ya = session.query(UnparsedEmail).filter_by(gmail_message_id=message_id).first()
+    if ya is not None:
+        return
+    session.add(UnparsedEmail(
+        gmail_message_id=message_id,
+        sender=sender,
+        subject=subject,
+        event_date=event_date,
+    ))
+
+
 def parse_message(sender: str, subject: str, plaintext_body: str, html_body: str, message_id: str, date_str: str):
     """
     Aplica el parser correspondiente según el remitente. Devuelve el dict
@@ -160,7 +180,14 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
 
     scanned = 0
     ingested = 0
-    skipped = 0
+    # 'duplicated' = ya lo teníamos (lo normal en cada pasada).
+    # 'irrelevant' = remitente que no nos interesa, colado por la query.
+    # 'unparsed'   = remitente que SÍ nos interesa pero no supimos leer: esto es
+    #                lo que delata un cambio de plantilla y antes se perdía
+    #                dentro de un único contador de "saltados".
+    duplicated = 0
+    irrelevant = 0
+    unparsed = 0
 
     messages = gmail_search_fn(query)
 
@@ -176,7 +203,7 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
         # de más a get_thread para mensajes irrelevantes que se cuelan en la query.
         if not (amazon.matches(sender) or aliexpress.matches(sender)
                 or gls.matches(sender) or correos.matches(sender)):
-            skipped += 1
+            irrelevant += 1
             continue
 
         body = gmail_get_thread_fn(message_id)
@@ -189,14 +216,15 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
             event_date = parse_event_date(date_str)
             parsed = gls.parse(sender, subject, plaintext_body or "", message_id, event_date)
             if parsed is None:
-                skipped += 1
+                record_unparsed(session, message_id, sender, subject, event_date)
+                unparsed += 1
                 continue
             created = ingest_carrier_event(session, parsed, courier="gls")
             if created:
                 ingested += 1
                 log(f"[gmail_sync] + gls {parsed['status']:<16} {subject[:50]}")
             else:
-                skipped += 1
+                duplicated += 1
             continue
 
         if correos.matches(sender):
@@ -205,19 +233,26 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
             event_date = parse_event_date(date_str)
             parsed = correos.parse(sender, subject, plaintext_body or "", message_id, event_date, html_body=html_body or "")
             if parsed is None:
-                skipped += 1
+                record_unparsed(session, message_id, sender, subject, event_date)
+                unparsed += 1
                 continue
             created = ingest_event(session, parsed)
             if created:
                 ingested += 1
                 log(f"[gmail_sync] + correos {parsed['status']:<16} {subject[:50]}")
             else:
-                skipped += 1
+                duplicated += 1
             continue
 
         parsed = parse_message(sender, subject, plaintext_body, html_body, message_id, date_str)
         if parsed is None:
-            skipped += 1
+            # Amazon ignora a propósito los emails de devolución: no son un
+            # fallo de parseo, así que no ensucian el contador.
+            if not amazon.should_ignore(sender):
+                record_unparsed(session, message_id, sender, subject, parse_event_date(date_str))
+                unparsed += 1
+            else:
+                irrelevant += 1
             continue
 
         # AliExpress en formato 'merge' devuelve una lista (varios paquetes en un email);
@@ -225,12 +260,20 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
         events_to_ingest = parsed if isinstance(parsed, list) else [parsed]
 
         for event in events_to_ingest:
+            # Un evento sin ningún identificador no se puede colgar de un
+            # paquete. ingest_event lo tiraría a la basura sin decir nada, y es
+            # justo la pinta que tiene una plantilla que ha cambiado.
+            if not evento_anclable(event):
+                record_unparsed(session, message_id, sender, subject, event["event_date"])
+                unparsed += 1
+                continue
+
             created = ingest_event(session, event)
             if created:
                 ingested += 1
                 log(f"[gmail_sync] + {event['source']} {event['status']:<16} {subject[:50]}")
             else:
-                skipped += 1
+                duplicated += 1
 
     # Sólo se marca el escaneo como hecho si se ha llegado hasta aquí sin
     # excepción. Si Gmail falla a mitad, el marcador no avanza y el siguiente
@@ -242,11 +285,19 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
     summary = {
         "scanned": scanned,
         "ingested": ingested,
-        "skipped": skipped,
+        "duplicated": duplicated,
+        "irrelevant": irrelevant,
+        "unparsed": unparsed,
+        # 'skipped' se conserva como suma de los tres, por compatibilidad.
+        "skipped": duplicated + irrelevant + unparsed,
         "lookback_days": days,
         "synced_at": momento,
     }
     log(f"[gmail_sync] Resumen: {summary}")
+    if unparsed:
+        log(f"[gmail_sync] AVISO: {unparsed} email(s) de remitentes conocidos "
+            f"que no se han sabido interpretar. Puede que haya cambiado una "
+            f"plantilla; míralos en /sin-reconocer")
     return summary
 
 

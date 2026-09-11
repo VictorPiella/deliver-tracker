@@ -6,7 +6,7 @@ from app.models import Package
 from app.sync import ingest_event
 from app.web import create_app, status_progress_pct
 
-from conftest import EVENT_DATE
+from conftest import EVENT_DATE, sincronizar
 
 
 def sembrar(db_path, **kwargs):
@@ -88,7 +88,7 @@ class TestSync:
     def test_el_boton_escanear_ingiere_los_emails_del_mock(self, client, db_path):
         assert client.get("/api/packages").get_json() == []
 
-        r = client.post("/sync")
+        r = sincronizar(client)
         assert r.status_code == 302
 
         paquetes = client.get("/api/packages").get_json()
@@ -97,14 +97,14 @@ class TestSync:
         assert fuentes == {"amazon", "aliexpress"}
 
     def test_escanear_dos_veces_no_duplica(self, client):
-        client.post("/sync")
+        sincronizar(client)
         primera = client.get("/api/packages").get_json()
-        client.post("/sync")
+        sincronizar(client)
         segunda = client.get("/api/packages").get_json()
         assert len(primera) == len(segunda) == 6
 
     def test_el_email_de_devolucion_no_entra(self, client):
-        client.post("/sync")
+        sincronizar(client)
         titulos = [p["title"] or "" for p in client.get("/api/packages").get_json()]
         assert not any("reembolso" in t.lower() for t in titulos)
 
@@ -123,7 +123,7 @@ class TestAppFactory:
         a = create_app(db_path=str(tmp_path / "a.db"), use_mock_gmail=True, enable_worker=False)
         b = create_app(db_path=str(tmp_path / "b.db"), use_mock_gmail=True, enable_worker=False)
 
-        a.test_client().post("/sync")
+        sincronizar(a.test_client())
 
         assert len(a.test_client().get("/api/packages").get_json()) == 6
         assert b.test_client().get("/api/packages").get_json() == []

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Emails sin reconocer{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Emails sin reconocer</h1>
+    <p class="page-sub">
+      Correos de remitentes que sí seguimos (Amazon, AliExpress, GLS, Correos) pero
+      que ningún parser ha sabido interpretar. Suele significar que han cambiado la
+      plantilla del email: mientras salgan aquí, esos envíos no aparecen en el panel.
+    </p>
+  </div>
+  {% if emails %}
+  <form method="POST" action="{{ url_for('limpiar_sin_reconocer') }}"
+        onsubmit="return confirm('¿Descartar la lista?\n\nNo se borra ningún email de Gmail; sólo se limpia este aviso.');">
+    <button type="submit" class="btn btn-ghost">Descartar lista</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if emails %}
+<div class="card">
+  <table class="tabla">
+    <thead>
+      <tr><th>Fecha</th><th>Remitente</th><th>Asunto</th></tr>
+    </thead>
+    <tbody>
+      {% for e in emails %}
+      <tr>
+        <td class="celda-fecha">{{ e.event_date|local('%d %b %Y · %H:%M') }}</td>
+        <td class="celda-remitente mono">{{ e.sender }}</td>
+        <td>{{ e.subject or '(sin asunto)' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="page-foot">
+  Si esto se repite, lo que toca es ajustar la expresión regular del parser
+  correspondiente en <code>app/parsers/</code> con el asunto de arriba como referencia.
+</p>
+{% else %}
+<div class="empty">
+  <div class="empty-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20 6 9 17l-5-5"/>
+    </svg>
+  </div>
+  <div class="empty-title">Todo reconocido</div>
+  <p>Cada email de los remitentes que seguimos se ha podido interpretar.</p>
+</div>
+{% endif %}
+
+{% endblock %}

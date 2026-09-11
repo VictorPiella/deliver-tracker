@@ -30,6 +30,16 @@ services:
       GMAIL_MIN_LOOKBACK_DAYS: "${GMAIL_MIN_LOOKBACK_DAYS:-14}"
       GMAIL_MAX_LOOKBACK_DAYS: "${GMAIL_MAX_LOOKBACK_DAYS:-365}"
       SYNC_INTERVAL_MINUTES: "${SYNC_INTERVAL_MINUTES:-60}"
+      # Hora que se MUESTRA en el panel (lo guardado siempre es UTC).
+      DISPLAY_TZ: "${DISPLAY_TZ:-${TZ:-Europe/Madrid}}"
+      # Los entregados se van solos a la papelera tras estos dias. 0 lo desactiva.
+      PURGE_DELIVERED_AFTER_DAYS: "${PURGE_DELIVERED_AFTER_DAYS:-30}"
+      # Copia diaria de la base en /data/backups.
+      BACKUP_ENABLED: "${BACKUP_ENABLED:-true}"
+      BACKUP_KEEP: "${BACKUP_KEEP:-7}"
+      # Contrasena del panel. Vacia = sin autenticacion (normal en una LAN).
+      PANEL_USER: "${PANEL_USER:-admin}"
+      PANEL_PASSWORD: "${PANEL_PASSWORD:-}"
       # Integración Home Assistant (MQTT Discovery). Desactivada por defecto;
       # pon MQTT_ENABLED=true y rellena el resto para publicar cada paquete
       # como sensor en HA.

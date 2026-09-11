@@ -12,7 +12,7 @@ from app.sync import (
 )
 from app.web import AUTO_STATUS
 
-from conftest import EVENT_DATE
+from conftest import EVENT_DATE, sincronizar
 
 
 def evento(**kwargs):
@@ -124,7 +124,7 @@ class TestRutaDeEstado:
         return client.get("/api/packages").get_json()[0]["id"]
 
     def test_cambiar_estado_desde_el_panel(self, client):
-        client.post("/sync")
+        sincronizar(client)
         pkg_id = self._id(client)
 
         r = client.post(f"/package/{pkg_id}/status", data={"status": "out_for_delivery"})
@@ -135,7 +135,7 @@ class TestRutaDeEstado:
         assert datos["status_is_manual"] is True
 
     def test_volver_a_automatico(self, client):
-        client.post("/sync")
+        sincronizar(client)
         pkg_id = self._id(client)
 
         client.post(f"/package/{pkg_id}/status", data={"status": "ordered"})
@@ -148,7 +148,7 @@ class TestRutaDeEstado:
         assert datos["status"] != "ordered"      # recalculado desde los eventos
 
     def test_estado_invalido_se_rechaza(self, client):
-        client.post("/sync")
+        sincronizar(client)
         pkg_id = self._id(client)
         antes = [p for p in client.get("/api/packages").get_json() if p["id"] == pkg_id][0]
 
@@ -163,7 +163,7 @@ class TestRutaDeEstado:
         assert client.post("/package/99999/status", data={"status": "delivered"}).status_code == 404
 
     def test_el_panel_muestra_la_marca_de_manual(self, client):
-        client.post("/sync")
+        sincronizar(client)
         pkg_id = self._id(client)
         assert 'class="manual-mark"' not in client.get("/").get_data(as_text=True)
 
@@ -173,7 +173,7 @@ class TestRutaDeEstado:
 
 class TestControlesEnElPanel:
     def test_cada_fila_trae_desplegable_y_boton_de_borrar(self, client):
-        client.post("/sync")
+        sincronizar(client)
         html = client.get("/").get_data(as_text=True)
         n = len(client.get("/api/packages").get_json())
 
@@ -184,7 +184,7 @@ class TestControlesEnElPanel:
         assert html.count('value="delivered"') == n
 
     def test_la_opcion_de_volver_a_automatico_solo_sale_si_hace_falta(self, client):
-        client.post("/sync")
+        sincronizar(client)
         assert AUTO_STATUS not in client.get("/").get_data(as_text=True)
 
         pkg_id = client.get("/api/packages").get_json()[0]["id"]
@@ -192,7 +192,7 @@ class TestControlesEnElPanel:
         assert AUTO_STATUS in client.get("/").get_data(as_text=True)
 
     def test_el_panel_trae_filtros_y_buscador(self, client):
-        client.post("/sync")
+        sincronizar(client)
         html = client.get("/").get_data(as_text=True)
         assert 'data-filter="transito"' in html
         assert 'data-filter="entregados"' in html

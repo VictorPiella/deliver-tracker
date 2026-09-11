@@ -201,6 +201,120 @@ svg { display: block; }
 
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
 
+/* ------------------------------------------------------------- navegacion */
+
+.topnav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: auto;
+  margin-left: 22px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.topnav::-webkit-scrollbar { display: none; }
+
+.navlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 520;
+  color: var(--text-muted);
+  padding: 7px 11px;
+  border-radius: var(--r-sm);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.navlink:hover { color: var(--text); background: var(--surface-2); }
+.navlink.is-active { color: var(--text); background: var(--surface-2); font-weight: 600; }
+
+/* Los emails sin reconocer son un aviso, no una seccion mas: se ven distintos
+   y el enlace solo existe cuando hay alguno. */
+.navlink-warn { color: var(--s-amber); }
+.navlink-warn:hover, .navlink-warn.is-active { color: var(--s-amber); background: var(--s-amber-bg); }
+
+.navbadge {
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------- cabecera de subpaginas */
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.page-head form { margin: 0; }
+
+.page-title {
+  font-size: 20px;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+  margin: 0 0 4px;
+}
+.page-sub {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+.page-foot {
+  margin-top: 14px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.page-foot code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+/* Las filas de la papelera se ven apagadas: estan fuera del panel. */
+.pkg-trashed { opacity: 0.72; }
+.pkg-trashed:hover { opacity: 1; }
+.pkg-trashed .thumb { filter: grayscale(0.55); }
+
+/* ------------------------------------------------------------------ tabla */
+
+.tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.tabla th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.tabla td {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.tabla tr:last-child td { border-bottom: none; }
+.celda-fecha { white-space: nowrap; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.celda-remitente { color: var(--text-soft); }
+
 /* ---------------------------------------------------------------- botones */
 
 .btn {
@@ -602,6 +716,16 @@ main {
 
 /* ------------------------------------------------------------------ fecha */
 
+/* Fecha estimada de entrega, tal cual la escribe el email. */
+.eta {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+}
+
 .pkg-date {
   display: flex;
   flex-direction: column;
@@ -825,6 +949,35 @@ main {
 .notice svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; color: var(--s-amber); }
 .notice strong { color: var(--text); }
 
+.merge-box {
+  margin-bottom: 22px;
+  padding: 14px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.merge-box summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 540;
+  color: var(--text-soft);
+  list-style: none;
+}
+.merge-box summary::-webkit-details-marker { display: none; }
+.merge-box summary::before { content: '+ '; color: var(--text-muted); }
+.merge-box[open] summary::before { content: '− '; }
+.merge-box summary:hover { color: var(--text); }
+.merge-help {
+  margin: 12px 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  max-width: 66ch;
+}
+.merge-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.merge-form .select-wrap { flex: 1; min-width: 200px; }
+.merge-form .select-wrap select { font-size: 13px; padding: 9px 28px 9px 12px; }
+
 .section-title {
   font-size: 12px;
   font-weight: 600;
@@ -893,7 +1046,18 @@ main {
 /* Por debajo de esto el grid deja de tener sentido: cada paquete pasa a ser
    una ficha apilada. */
 @media (max-width: 760px) {
-  .topbar-inner { padding: 10px 16px; }
+  .topbar-inner { padding: 10px 16px; flex-wrap: wrap; }
+  .topnav {
+    order: 3;
+    width: 100%;
+    margin: 6px 0 0;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+  }
+  .brand { margin-right: auto; }
+  .page-head { gap: 12px; }
+  .tabla th:first-child, .tabla td:first-child { padding-left: 14px; }
+  .tabla .celda-remitente { display: none; }
   main { padding: 20px 16px 56px; }
 
   .stats { gap: 8px; }
@@ -929,4 +1093,47 @@ main {
 
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+
+/* --------------------------------------------------- aviso de escaneo */
+
+/* El escaneo corre en segundo plano; este aviso es lo unico que indica que
+   algo esta pasando mientras tanto. */
+.sync-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 520;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-md);
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: girar 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes girar { to { transform: rotate(360deg); } }
+
+/* Sin esto el aviso se ve SIEMPRE: el `display: flex` de arriba es una regla de
+   autor y gana al `display: none` que el navegador aplica a [hidden]. */
+.sync-toast[hidden] { display: none; }
+
+@media (max-width: 760px) {
+  .sync-toast { right: 12px; left: 12px; bottom: 12px; justify-content: center; }
 }

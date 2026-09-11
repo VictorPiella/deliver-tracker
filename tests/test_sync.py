@@ -258,3 +258,63 @@ class TestQueryDeBusqueda:
         # conectas la cuenta por primera vez.
         from app.gmail_sync import FIRST_SCAN_DAYS
         assert FIRST_SCAN_DAYS >= 21
+
+
+class TestAdopcionDelPaqueteProvisional:
+    """
+    El email de "Pedido realizado" de Amazon no trae shipmentId, así que crea un
+    paquete provisional 'order-<pedido>'. Cuando llega el de "Enviado", que sí
+    lo trae, debe ADOPTAR ese provisional y no crear uno nuevo: si no, el mismo
+    pedido sale dos veces en el panel, uno clavado en "Pedido realizado".
+    """
+
+    def _amazon(self, **kwargs):
+        base = {
+            "source": "amazon",
+            "order_id": "408-2435062-0199514",
+            "package_id": None,
+            "status": "ordered",
+            "status_label_raw": "Pedido",
+            "title": "WOLTU Mesitas",
+            "image_url": None,
+            "message_id": "m-pedido",
+            "event_date": EVENT_DATE,
+        }
+        base.update(kwargs)
+        return base
+
+    def test_el_envio_real_adopta_el_provisional(self, session):
+        ingest_event(session, self._amazon(message_id="m1", package_id=None, status="ordered"))
+        assert session.query(Package).one().external_package_id == "order-408-2435062-0199514"
+
+        ingest_event(session, self._amazon(message_id="m2", package_id="DLMJWgm4J", status="shipped"))
+
+        assert session.query(Package).count() == 1
+        p = session.query(Package).one()
+        assert p.external_package_id == "DLMJWgm4J"
+        assert p.status == "shipped"
+        # Y conserva el histórico del provisional.
+        assert len(p.events) == 2
+
+    def test_el_pedido_sigue_siendo_uno_solo(self, session):
+        ingest_event(session, self._amazon(message_id="m1", package_id=None))
+        ingest_event(session, self._amazon(message_id="m2", package_id="DLMJWgm4J", status="shipped"))
+        assert session.query(Order).count() == 1
+
+    def test_un_segundo_envio_del_mismo_pedido_si_es_otro_paquete(self, session):
+        # Pedido partido en dos envíos: el primero adopta el provisional, el
+        # segundo es un paquete de verdad aparte.
+        ingest_event(session, self._amazon(message_id="m1", package_id=None))
+        ingest_event(session, self._amazon(message_id="m2", package_id="ENVIO1", status="shipped"))
+        ingest_event(session, self._amazon(message_id="m3", package_id="ENVIO2", status="shipped"))
+
+        ids = {p.external_package_id for p in session.query(Package).all()}
+        assert ids == {"ENVIO1", "ENVIO2"}
+
+    def test_no_adopta_si_ese_envio_ya_existe(self, session):
+        ingest_event(session, self._amazon(message_id="m1", package_id="DLMJWgm4J", status="shipped"))
+        ingest_event(session, self._amazon(message_id="m2", package_id=None, status="ordered"))
+        antes = session.query(Package).count()
+
+        ingest_event(session, self._amazon(message_id="m3", package_id="DLMJWgm4J", status="out_for_delivery"))
+        assert session.query(Package).count() == antes

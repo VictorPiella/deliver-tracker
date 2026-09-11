@@ -176,11 +176,61 @@ scp data\credentials.json data\token.json root@192.168.1.10:/mnt/user/appdata/de
 
 ## El panel
 
-Cada fila del panel lleva:
+Cada fila lleva:
 
-- **Desplegable de estado** — marca un paquete a mano (p.ej. como *Entregado* porque ya lo tienes). Un estado manual **manda sobre los emails**: los que lleguen después se siguen guardando en el histórico, pero no cambian el estado. Se marca con la etiqueta `manual` junto al estado.
-- **Volver a automático** (`↺`, sólo aparece si el estado es manual) — suelta el control y recalcula el estado desde los eventos recibidos.
-- **Botón de papelera** — borra el paquete y su histórico, y retira su entidad de Home Assistant.
+- **Desplegable de estado** — marca un paquete a mano (p.ej. como *Entregado* porque ya lo tienes). Un estado manual **manda sobre los emails**: los que lleguen después se siguen guardando en el histórico, pero no cambian el estado. Se marca con la etiqueta `manual`.
+- **Volver a automático** (`↺`, sólo si el estado es manual) — suelta el control y recalcula el estado desde los eventos recibidos.
+- **Botón de papelera** — lo aparta del panel. **No lo borra**: ver abajo.
+- **Fecha estimada de entrega**, cuando el email la trae (Amazon la escribe como *"Llegada entre el 6 y el 7 de julio"*).
+
+En la página de detalle hay además un **Fusionar**, para unir dos entradas que
+son el mismo envío. Sirve sobre todo para Correos: sus emails no traen ningún ID
+de Amazon/AliExpress, así que aparecen como entrada aparte y no se pueden
+enlazar de forma automática sin arriesgarse a mezclar paquetes.
+
+### Papelera: borrar es reversible
+
+Borrar manda el paquete a la **papelera**, de donde se puede restaurar tal cual
+estaba, con su histórico y su estado manual. Desde ahí se puede borrar de forma
+definitiva, pero eso ya no tiene vuelta atrás.
+
+> **Por qué no se borra de verdad.** Borrar la fila arrastra en cascada sus
+> `package_events`, y esos eventos guardan el `gmail_message_id` — justo lo que
+> impide reprocesar un email ya visto. El resultado era que **el paquete
+> reaparecía en el siguiente escaneo**, con el estado manual perdido por el
+> camino. Marcándolo como borrado, los eventos se conservan, el email no se
+> reingiere, y encima se puede deshacer.
+
+Los paquetes **entregados** se van solos a la papelera pasados
+`PURGE_DELIVERED_AFTER_DAYS` días (30 por defecto, `0` lo desactiva). Antes esto
+los borraba definitivamente a los 15 días: con la base como única copia
+duradera, eso destruía el histórico de compras sin avisar.
+
+### Emails sin reconocer
+
+Si llega un email de un remitente que seguimos pero ningún parser sabe leerlo,
+aparece un aviso en la cabecera y se lista en `/sin-reconocer` con su asunto.
+
+Es la señal de que Amazon o AliExpress han cambiado una plantilla. Los parsers
+son expresiones regulares contra el HTML de sus emails: cuando cambian, `parse()`
+devuelve `None` y dejarías de ver paquetes sin enterarte de nada. Con esto la
+deriva se ve, en vez de esconderse en un contador de "saltados".
+
+### Copias de seguridad
+
+Cada día, tras el escaneo, se guarda una copia de la base en
+`<volumen>/backups/packages-AAAAMMDD.db` (se conservan `BACKUP_KEEP`, 7 por
+defecto). Se usa `VACUUM INTO`, que hace la copia de forma transaccional: copiar
+el `.db` a pelo mientras el worker escribe produce un fichero roto que parece
+bueno.
+
+Como viven dentro del volumen que ya montas, entran solas en el backup de
+appdata de Unraid.
+
+El escaneo corre **en segundo plano**: el botón contesta al instante y el panel se
+actualiza solo al terminar. Antes corría dentro de la propia petición, y tras un
+parón largo la ventana adaptativa puede pedir hasta un año de correo — más que
+el timeout de gunicorn.
 
 Arriba, las tres tarjetas de recuento (*Total / En tránsito / Entregados*) hacen de filtro, y el buscador filtra por nombre de producto, ID de paquete y número de seguimiento. Ambos funcionan en el cliente: la lista de un panel doméstico cabe entera en la página.
 
@@ -319,6 +369,11 @@ Se leen de `.env` (copia `.env.example`).
 | `GMAIL_MIN_LOOKBACK_DAYS` | `14` | Suelo de la ventana en escaneos normales |
 | `GMAIL_MAX_LOOKBACK_DAYS` | `365` | Techo de la ventana tras un parón largo |
 | `SYNC_INTERVAL_MINUTES` | `60` | Cada cuánto sincroniza el worker |
+| `DISPLAY_TZ` | el de `TZ` | Zona en la que se **muestran** las fechas (se guardan en UTC) |
+| `PURGE_DELIVERED_AFTER_DAYS` | `30` | Días hasta que un entregado se archiva en la papelera (`0` desactiva) |
+| `BACKUP_ENABLED` | `true` | Copia diaria de la base en `<volumen>/backups` |
+| `BACKUP_KEEP` | `7` | Cuántas copias se conservan |
+| `PANEL_USER` / `PANEL_PASSWORD` | `admin` / _(vacío)_ | Con contraseña puesta, el panel pide autenticación básica |
 | `MQTT_ENABLED` | `false` | `true` para publicar a Home Assistant |
 | `MQTT_HOST` | `localhost` | Host del broker MQTT |
 | `MQTT_PORT` | `1883` | Puerto del broker MQTT |
@@ -327,7 +382,7 @@ Se leen de `.env` (copia `.env.example`).
 | `DEBUGPY` | `0` | `1` abre el puerto 5678 para VS Code |
 | `DEBUGPY_WAIT` | `0` | `1` congela el arranque hasta que te enganchas |
 
-> Las fechas se guardan siempre en **UTC sin tzinfo**. SQLite descarta el offset al guardar un datetime con `tzinfo`, así que los emails (que llegan con offset local) se convierten antes de persistirse — ver `app/timeutils.py`. `TZ` sólo afecta a los logs del container.
+> Las fechas se guardan siempre en **UTC sin tzinfo**. SQLite descarta el offset al guardar un datetime con `tzinfo`, así que los emails (que llegan con offset local) se convierten antes de persistirse — ver `app/timeutils.py`. Para **mostrarlas** se reconvierten a `DISPLAY_TZ`; sin eso el panel enseñaba las horas con 1-2h de desfase.
 
 ## Estado actual
 
@@ -342,6 +397,13 @@ Se leen de `.env` (copia `.env.example`).
 - [x] Integración con Home Assistant vía MQTT Discovery
 - [x] Dockerizado: bucle de desarrollo en Windows + despliegue a Unraid
 - [x] Suite de tests (pytest)
+- [x] Papelera: borrar es reversible, y ya no resucita en el siguiente escaneo
+- [x] Fecha estimada de entrega
+- [x] Aviso de emails sin reconocer (deriva de plantillas)
+- [x] Copias de seguridad diarias de la base
+- [x] Escaneo en segundo plano, sin timeouts
+- [x] Fusionar entradas duplicadas (Correos)
+- [x] Contraseña opcional del panel
 
 ## Próximos pasos
 

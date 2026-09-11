@@ -51,12 +51,36 @@ class Package(Base):
     # si has marcado algo como entregado porque lo tienes en la mano, un email
     # que llega tarde no debe devolverlo a "en reparto".
     status_is_manual = Column(Boolean, nullable=False, default=False)
-    eta = Column(String)                                # fecha estimada de entrega si viene en el email (texto libre por ahora)
+    # Borrado LOGICO. El borrado fisico resucitaba el paquete: al borrar en
+    # cascada sus package_events se destruian los gmail_message_id, que son
+    # justo lo que impide reprocesar un email, asi que el escaneo siguiente
+    # volvia a crearlo. Marcandolo aqui, los eventos se conservan (el email ya
+    # no se reingiere) y ademas el borrado es reversible desde la papelera.
+    deleted_at = Column(DateTime, index=True)
+    eta = Column(String)                                # fecha estimada de entrega (texto libre del email)                                # fecha estimada de entrega si viene en el email (texto libre por ahora)
     last_updated = Column(DateTime, default=utcnow, onupdate=utcnow)
     created_at = Column(DateTime, default=utcnow)
 
     order = relationship("Order", back_populates="packages")
     events = relationship("PackageEvent", back_populates="package", cascade="all, delete-orphan", order_by="PackageEvent.event_date")
+
+
+class UnparsedEmail(Base):
+    """
+    Emails de un remitente que SI nos interesa pero que ningun parser ha sabido
+    leer. Los parsers son expresiones regulares contra el HTML de marketing de
+    Amazon/AliExpress: el dia que cambien la plantilla, parse() devolvera None
+    en silencio y dejarias de ver paquetes sin enterarte. Guardarlos aqui hace
+    visible esa deriva en vez de esconderla en un contador de "saltados".
+    """
+    __tablename__ = "unparsed_emails"
+
+    id = Column(Integer, primary_key=True)
+    gmail_message_id = Column(String, index=True, unique=True)
+    sender = Column(String)
+    subject = Column(String)
+    event_date = Column(DateTime)
+    seen_at = Column(DateTime, default=utcnow)
 
 
 class AppSetting(Base):
@@ -180,6 +204,8 @@ def get_engine(db_path="/data/packages.db"):
 _MIGRATIONS = [
     ("packages", "status_is_manual",
      "ALTER TABLE packages ADD COLUMN status_is_manual BOOLEAN NOT NULL DEFAULT 0"),
+    ("packages", "deleted_at",
+     "ALTER TABLE packages ADD COLUMN deleted_at DATETIME"),
 ]
 
 

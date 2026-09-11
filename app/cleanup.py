@@ -1,53 +1,100 @@
 """
-cleanup.py — borrado de paquetes (manual desde la UI, y automático para los
-que llevan mucho tiempo entregados).
+cleanup.py — borrado de paquetes: a la papelera desde el panel, borrado
+definitivo desde la papelera, y archivado automático de los entregados viejos.
+
+Por qué el borrado es lógico y no físico
+----------------------------------------
+Borrar la fila de un paquete se lleva por delante, en cascada, sus
+package_events. Y esos eventos guardan el gmail_message_id, que es exactamente
+lo que impide reprocesar un email ya visto. Resultado: borrabas un paquete y el
+escaneo siguiente lo volvía a crear desde los mismos emails, que seguían en la
+ventana de búsqueda.
+
+Marcando `deleted_at` en su lugar, los eventos se conservan, el email no se
+reingiere, el paquete no reaparece — y encima el borrado deja de ser definitivo.
+El borrado físico sigue existiendo (`hard_delete_package`) pero sólo se dispara
+a mano desde la papelera, nunca de forma automática.
 """
+import os
 from datetime import timedelta
 
-from .models import get_session, Order, Package
+from .models import Order, Package, get_session
 from .timeutils import utcnow
 from .mqtt_publish import unpublish_package
 
-# Cuántos días se conserva un paquete tras marcarse como "delivered" antes
-# de purgarlo automáticamente. Pasado ese tiempo ya no aporta nada al panel.
-DELETE_DELIVERED_AFTER_DAYS = 15
+# Días que un paquete entregado sigue en el panel antes de irse solo a la
+# papelera (de donde siempre se puede recuperar). 0 desactiva el archivado.
+PURGE_DELIVERED_AFTER_DAYS = int(os.environ.get("PURGE_DELIVERED_AFTER_DAYS", "30"))
 
 
-def delete_package(session, package: Package) -> None:
+def soft_delete_package(session, package: Package) -> None:
+    """Manda un paquete a la papelera. Reversible con restore_package()."""
+    if package.deleted_at is None:
+        package.deleted_at = utcnow()
+
+
+def restore_package(session, package: Package) -> None:
+    """Saca un paquete de la papelera. Sus eventos nunca se fueron."""
+    package.deleted_at = None
+
+
+def hard_delete_package(session, package: Package) -> None:
     """
-    Borra un paquete (sus eventos se van por cascade, ver models.Package.events).
-    Si era el último paquete de su pedido, borra también el pedido huérfano.
+    Borrado definitivo: la fila y, en cascada, sus eventos.
+
+    OJO: al irse los eventos se pierden sus gmail_message_id, así que si los
+    emails de origen siguen dentro de la ventana de búsqueda el paquete
+    reaparecerá en el próximo escaneo. Es aceptable aquí porque es una acción
+    explícita del usuario desde la papelera, pero es justo el motivo de que el
+    borrado normal sea lógico.
     """
     order_id = package.order_id
     session.delete(package)
     session.flush()
 
-    remaining = session.query(Package).filter_by(order_id=order_id).count()
-    if remaining == 0:
+    # Si era el último paquete de su pedido, el pedido se queda huérfano.
+    restantes = session.query(Package).filter_by(order_id=order_id).count()
+    if restantes == 0:
         order = session.get(Order, order_id)
         if order is not None:
             session.delete(order)
 
 
+# Nombre histórico, mantenido para no romper llamadas existentes.
+delete_package = soft_delete_package
+
+
 def purge_old_delivered(db_path: str, log=print) -> int:
     """
-    Borra los paquetes en estado 'delivered' con más de DELETE_DELIVERED_AFTER_DAYS
-    días desde su última actualización. Devuelve cuántos se han borrado.
+    Manda a la papelera los paquetes entregados hace más de
+    PURGE_DELIVERED_AFTER_DAYS. Devuelve cuántos se han archivado.
+
+    Antes esto BORRABA definitivamente a los 15 días. Con la base como única
+    copia duradera (los emails puede que ya no existan), eso destruía el
+    histórico de compras en silencio y sin vuelta atrás. Ahora sólo los aparta
+    del panel, y siguen recuperables desde la papelera.
     """
-    cutoff = utcnow() - timedelta(days=DELETE_DELIVERED_AFTER_DAYS)
+    if PURGE_DELIVERED_AFTER_DAYS <= 0:
+        return 0
+
+    corte = utcnow() - timedelta(days=PURGE_DELIVERED_AFTER_DAYS)
     session = get_session(db_path)
-    old_packages = (
+    viejos = (
         session.query(Package)
-        .filter(Package.status == "delivered", Package.last_updated < cutoff)
+        .filter(
+            Package.status == "delivered",
+            Package.last_updated < corte,
+            Package.deleted_at.is_(None),
+        )
         .all()
     )
-    for package in old_packages:
-        delete_package(session, package)
+    for package in viejos:
+        soft_delete_package(session, package)
         unpublish_package(package.id, log=log)
 
-    if old_packages:
+    if viejos:
         session.commit()
-        log(f"[cleanup] {len(old_packages)} paquete(s) entregados hace "
-            f"más de {DELETE_DELIVERED_AFTER_DAYS} días, purgados")
+        log(f"[cleanup] {len(viejos)} paquete(s) entregados hace más de "
+            f"{PURGE_DELIVERED_AFTER_DAYS} días, movidos a la papelera")
     session.close()
-    return len(old_packages)
+    return len(viejos)

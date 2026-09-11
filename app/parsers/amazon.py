@@ -110,6 +110,31 @@ def extract_image_url(html_body: str = "") -> str | None:
     return None
 
 
+# Fecha estimada de entrega. Amazon la escribe en el cuerpo en texto plano, con
+# varias formas seg\u00fan el env\u00edo sea un rango o un d\u00eda concreto:
+#   "Llegada entre el 6 de julio y el 7 de julio"
+#   "Llegada el martes, 8 de julio"
+#   "Llegada hoy" / "Llegada ma\u00f1ana"
+# Se guarda como texto tal cual. Normalizarlo a fecha exigir\u00eda adivinar el a\u00f1o
+# (Amazon no lo pone) y no aporta nada para ense\u00f1arlo en el panel.
+ETA_PATTERNS = [
+    re.compile(r"Llegada\s+(entre\s+el\s+.{3,40}?\s+y\s+el\s+[^\n]{3,40})", re.IGNORECASE),
+    re.compile(r"Llegada\s+(el\s+[^\n]{3,50})", re.IGNORECASE),
+    re.compile(r"Llegada\s+(hoy|ma[n\u00f1]ana)\b", re.IGNORECASE),
+]
+
+
+def extract_eta(body_text: str = "") -> str | None:
+    """Devuelve la fecha estimada de entrega como texto libre, o None."""
+    if not body_text:
+        return None
+    for patron in ETA_PATTERNS:
+        m = patron.search(body_text)
+        if m:
+            return " ".join(m.group(1).split()).strip(" .,")
+    return None
+
+
 QUOTE_CHARS = ' "\u201c\u201d\u2018\u2019'
 
 
@@ -158,9 +183,11 @@ def parse(sender: str, subject: str, body_text: str, message_id: str, event_date
     shipment_id = extract_shipment_id(body_text)
     image_url = extract_image_url(html_body)
     title = clean_title(subject)
+    eta = extract_eta(body_text)
 
     return {
         "source": "amazon",
+        "eta": eta,
         "order_id": order_id,
         "package_id": shipment_id,  # None si no se pudo extraer; sync.py usará fallback
         "status": status,

@@ -38,6 +38,19 @@
         <span class="brand-name">Delivery Tracker</span>
       </a>
 
+      <nav class="topnav">
+        <a href="{{ url_for('index') }}" class="navlink {{ 'is-active' if request.endpoint == 'index' }}">Paquetes</a>
+        <a href="{{ url_for('papelera') }}" class="navlink {{ 'is-active' if request.endpoint == 'papelera' }}">
+          Papelera{% if n_papelera %} <span class="navbadge">{{ n_papelera }}</span>{% endif %}
+        </a>
+        {% if n_sin_reconocer %}
+        <a href="{{ url_for('sin_reconocer') }}" class="navlink navlink-warn {{ 'is-active' if request.endpoint == 'sin_reconocer' }}"
+           title="Emails de remitentes conocidos que no se han sabido interpretar">
+          Sin reconocer <span class="navbadge">{{ n_sin_reconocer }}</span>
+        </a>
+        {% endif %}
+      </nav>
+
       <div class="topbar-actions">
         <button type="button" class="icon-btn" id="tema-toggle"
                 title="Cambiar tema" aria-label="Cambiar entre tema claro y oscuro">
@@ -76,6 +89,50 @@
     {% endwith %}
     {% block content %}{% endblock %}
   </main>
+
+  <div class="sync-toast" id="sync-toast" hidden>
+    <span class="spinner" aria-hidden="true"></span>
+    <span>Escaneando el correo…</span>
+  </div>
+
+  <script>
+    // El escaneo corre en segundo plano; se sondea hasta que acaba y se
+    // recarga para enseñar lo que haya entrado.
+    (function () {
+      var toast = document.getElementById('sync-toast');
+      if (!toast) return;
+      var estabaCorriendo = false;
+      var temporizador = null;
+
+      function sondear() {
+        fetch('{{ url_for("api_sync_status") }}', { cache: 'no-store' })
+          .then(function (r) { return r.json(); })
+          .then(function (estado) {
+            toast.hidden = !estado.running;
+            if (estado.running) {
+              estabaCorriendo = true;
+              temporizador = setTimeout(sondear, 1500);
+            } else if (estabaCorriendo) {
+              window.location.reload();
+            }
+          })
+          .catch(function () {
+            // Sin conexión con el panel: se deja de sondear en silencio.
+            toast.hidden = true;
+            if (temporizador) clearTimeout(temporizador);
+          });
+      }
+
+      sondear();
+      document.querySelectorAll('.sync-form').forEach(function (f) {
+        f.addEventListener('submit', function () {
+          toast.hidden = false;
+          estabaCorriendo = true;
+          setTimeout(sondear, 800);
+        });
+      });
+    })();
+  </script>
 
   <script>
     (function () {

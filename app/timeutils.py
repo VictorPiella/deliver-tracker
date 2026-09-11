@@ -11,7 +11,13 @@ evento 1-2 horas y los dejaba incomparables con datetime.utcnow().
 Las dos funciones de aquí son el único sitio donde se construyen fechas:
 convertir a UTC *antes* de guardar hace que el desplazamiento no ocurra.
 """
+import os
 from datetime import datetime, timezone
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:   # pragma: no cover - Python < 3.9
+    ZoneInfo = None
 
 
 def utcnow() -> datetime:
@@ -29,3 +35,32 @@ def to_utc_naive(dt: datetime | None) -> datetime | None:
     if dt.tzinfo is None:
         return dt
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+# --- Zona para MOSTRAR ---
+# Guardamos siempre en UTC, pero el panel tiene que enseñar la hora del reloj de
+# casa. Sin esto se veían las horas con el desfase de UTC (1-2h en España).
+DISPLAY_TZ = os.environ.get("DISPLAY_TZ") or os.environ.get("TZ") or "Europe/Madrid"
+
+
+def _zona_local():
+    if ZoneInfo is None:
+        return timezone.utc
+    try:
+        return ZoneInfo(DISPLAY_TZ)
+    except Exception:
+        # Zona mal escrita o sin tzdata en el sistema: mejor enseñar UTC que
+        # reventar el panel entero.
+        return timezone.utc
+
+
+def a_zona_local(dt: datetime | None) -> datetime | None:
+    """
+    Pasa un datetime UTC naive (lo que hay en la base) a la zona de DISPLAY_TZ,
+    listo para formatear. Sólo para mostrar: nunca para guardar.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_zona_local())

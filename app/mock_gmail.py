@@ -109,6 +109,37 @@ _MESSAGES = [
 # (Amazon siempre; AliExpress merge para extraer los bloques de paquetes).
 # El resto de AliExpress individuales no necesitan cuerpo, así que no se listan.
 _BODIES = {
+    # Emails de "Pedido realizado". Llevan el nº de pedido y la fecha estimada
+    # de entrega en el cuerpo; sin ellos el parser no tiene de dónde agarrar el
+    # evento y el email acaba, con razón, en la lista de "sin reconocer".
+    "19f0298eb0bd4003": {
+        "plaintext_body": (
+            "Gracias por tu pedido\n"
+            "Llegada entre el 6 de julio y el 7 de julio\n"
+            "Pedido n.º\n408-2435062-0199514\n"
+            "Ver o gestionar el pedido\n"
+            "https://www.amazon.es/gp/css/order-details?orderId=408-2435062-0199514\n"
+        ),
+        "html_body": (
+            '<img class="productImage" width="122" '
+            'src="https://m.media-amazon.com/images/I/61YAm9AW-OL._SS90_.jpg" '
+            'alt="WOLTU Mesitas de Noche">'
+        ),
+    },
+    "19ef544e9ef4a1a5": {
+        "plaintext_body": (
+            "Gracias por tu pedido\n"
+            "Llegada el martes, 24 de junio\n"
+            "Pedido n.º\n408-3320942-2576360\n"
+            "Ver o gestionar el pedido\n"
+            "https://www.amazon.es/gp/css/order-details?orderId=408-3320942-2576360\n"
+        ),
+        "html_body": (
+            '<img class="productImage" width="122" '
+            'src="https://m.media-amazon.com/images/I/41xJ8K2pQrL._SS90_.jpg" '
+            'alt="Grupo de Seguridad Valvula">'
+        ),
+    },
     "19f0ce1c15a2981e": {
         "plaintext_body": (
             "Mis pedidos\n¡Tu paquete se ha enviado!\nPedido\nEnviado\nEn reparto\nEntregado\n"
