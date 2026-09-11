@@ -123,7 +123,7 @@ El script hace: `docker build` → `docker save` → `scp` → `docker load` →
 
    ```powershell
    ssh root@192.168.1.10 "mkdir -p /mnt/user/appdata/deliver-tracker"
-   scp data\credentials.json data	oken.json root@192.168.1.10:/mnt/user/appdata/deliver-tracker/
+   scp data\credentials.json data\token.json root@192.168.1.10:/mnt/user/appdata/deliver-tracker/
    ```
 
 4. **Cambia `FLASK_SECRET_KEY`** en el compose remoto (el script no lo
