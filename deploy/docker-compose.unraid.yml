@@ -1,0 +1,51 @@
+# Compose para Unraid. Este fichero es autónomo: se copia a Unraid junto con la
+# imagen ya construida, no hace falta el repo ni que Unraid compile nada.
+#
+# Ubicación recomendada en Unraid:
+#   /boot/config/plugins/compose.manager/projects/deliver-tracker/docker-compose.yml
+# (o cualquier carpeta si lo lanzas a mano por SSH)
+#
+# Despliegue desde Windows, en una orden:
+#   .\deploy\deploy-unraid.ps1 -UnraidHost 192.168.1.10
+#
+# A mano, si lo prefieres:
+#   docker compose pull            # no aplica: la imagen se carga con docker load
+#   docker compose up -d
+services:
+  deliver-tracker:
+    # Sin `build:` a propósito. La imagen se construye en Windows y se carga en
+    # Unraid con `docker load`; ver deploy/deploy-unraid.ps1. El tag debe
+    # coincidir con el que genera ese script.
+    image: deliver-tracker:latest
+    container_name: deliver-tracker
+    ports:
+      - "5000:5000"
+    volumes:
+      # Único directorio que hay que respaldar: contiene packages.db y, si usas
+      # Gmail real, credentials.json + token.json.
+      - /mnt/user/appdata/deliver-tracker:/data
+    environment:
+      DB_PATH: /data/packages.db
+      TZ: Europe/Madrid
+
+      # false = Gmail real. Requiere credentials.json y token.json dentro de
+      # /mnt/user/appdata/deliver-tracker/ (ver README, "Conectar Gmail real").
+      # Ponlo en true para arrancar con datos de ejemplo y comprobar que el
+      # panel levanta antes de meter las credenciales.
+      USE_MOCK_GMAIL: "false"
+      ENABLE_BACKGROUND_WORKER: "true"
+
+      # CÁMBIALA. Genera una con:
+      #   python -c "import secrets; print(secrets.token_hex(32))"
+      FLASK_SECRET_KEY: "change-me-in-production"
+
+      # --- Home Assistant (MQTT Discovery) ---
+      # Apunta MQTT_HOST al broker de HA (normalmente la IP del propio Unraid
+      # si Mosquitto corre ahí) y pon MQTT_ENABLED=true.
+      MQTT_ENABLED: "false"
+      MQTT_HOST: ""
+      MQTT_PORT: "1883"
+      MQTT_USERNAME: ""
+      MQTT_PASSWORD: ""
+      MQTT_DISCOVERY_PREFIX: "homeassistant"
+    restart: unless-stopped

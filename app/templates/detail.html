@@ -4,10 +4,25 @@
 
 <div class="detail-toolbar">
   <a class="back-link" href="{{ url_for('index') }}">&larr; Volver al manifiesto</a>
-  <form method="POST" action="{{ url_for('delete_package_route', package_id=package.id) }}"
-        onsubmit="return confirm('¿Eliminar este paquete? No se puede deshacer.');">
-    <button type="submit" class="btn-delete">Eliminar paquete</button>
-  </form>
+
+  <div class="detail-actions">
+    <form method="POST" action="{{ url_for('set_status_route', package_id=package.id) }}">
+      <select name="status" onchange="this.form.submit()" aria-label="Cambiar estado">
+        {% for valor, etiqueta in estados %}
+        <option value="{{ valor }}" {{ 'selected' if valor == package.status }}>{{ etiqueta }}</option>
+        {% endfor %}
+        {% if package.status_is_manual %}
+        <option value="{{ auto_status }}">↺ Volver a automático</option>
+        {% endif %}
+      </select>
+      <noscript><button type="submit" class="btn-mini">Aplicar</button></noscript>
+    </form>
+
+    <form method="POST" action="{{ url_for('delete_package_route', package_id=package.id) }}"
+          onsubmit="return confirm('¿Eliminar este paquete?\n\nSe borra también su histórico de eventos. No se puede deshacer.');">
+      <button type="submit" class="btn-delete">Eliminar paquete</button>
+    </form>
+  </div>
 </div>
 
 <div class="detail-header">
@@ -20,7 +35,7 @@
     {% else %}
     <div class="detail-thumb detail-thumb-fallback {{ package.source }}">{{ package.source[:2]|upper }}</div>
     {% endif %}
-    <div style="flex:1">
+    <div style="flex:1; min-width:0">
       <h2>{{ package.title or '(sin nombre de producto)' }}</h2>
       <div class="progress-track">
         <div class="progress-fill {{ package.status }}" style="width: {{ package.progress_pct }}%;"></div>
@@ -50,8 +65,17 @@
       <span>{{ package.courier_tracking_number or '—' }}</span>
     </div>
   </div>
+
+  {% if package.status_is_manual %}
+  <div class="manual-notice">
+    <strong>Estado fijado a mano.</strong> Los emails que lleguen se seguirán guardando
+    en el histórico de abajo, pero no cambiarán este estado. Elige
+    «↺ Volver a automático» en el desplegable para devolvérselo a los emails.
+  </div>
+  {% endif %}
 </div>
 
+{% if timeline %}
 <ul class="timeline">
   {% for ev in timeline %}
   <li {% if loop.last %}class="is-last"{% endif %}>
@@ -61,5 +85,11 @@
   </li>
   {% endfor %}
 </ul>
+{% else %}
+<div class="empty-state">
+  <div class="stamp">Sin eventos</div>
+  <p>Este paquete no tiene ningún email asociado todavía.</p>
+</div>
+{% endif %}
 
 {% endblock %}

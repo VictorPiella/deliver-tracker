@@ -1,17 +1,32 @@
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
+/*
+  Manifiesto — panel de seguimiento de paquetes.
+  La idea visual es una hoja de manifiesto de envío: papel, tipografía
+  condensada para los titulares, monoespaciada para los datos, y sellos de
+  color para los estados.
+*/
+
 :root {
   --paper: #F7F5F0;
+  --paper-raised: #FFFFFF;
   --paper-line: #E4E0D6;
+  --paper-hover: #EFEBE0;
   --ink: #1A1A1A;
   --ink-soft: #4A4640;
   --steel: #6B7280;
   --tape: #E8B931;
   --stamp-red: #C1432E;
   --stamp-green: #3D6B4F;
+  --stamp-blue: #2C5F8A;
+  --stamp-violet: #6B4E8A;
 
   --font-display: 'Oswald', 'Arial Narrow', 'Helvetica Neue Condensed', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+
+  /* Una sola definición del grid: la cabecera y las filas no se pueden
+     desalinear porque leen la misma variable. */
+  --cols: 84px minmax(0, 1fr) 160px 110px 186px;
 }
 
 * { box-sizing: border-box; }
@@ -23,17 +38,24 @@ body {
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 a { color: inherit; }
 
+/* ------------------------------------------------------------------ topbar */
+
 .topbar {
   display: flex;
-  align-items: baseline;
+  align-items: flex-end;
   justify-content: space-between;
-  padding: 28px 40px 20px;
+  gap: 16px;
+  padding: 26px 40px 18px;
   border-bottom: 3px solid var(--ink);
+  background: var(--paper);
 }
+
+.brand { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
 
 .topbar h1 {
   font-family: var(--font-display);
@@ -42,18 +64,18 @@ a { color: inherit; }
   letter-spacing: 0.02em;
   text-transform: uppercase;
   margin: 0;
+  line-height: 1;
 }
+.topbar h1 .accent { color: var(--stamp-red); }
 
-.topbar h1 .accent {
-  color: var(--stamp-red);
-}
-
-.topbar .meta {
-  font-size: 12px;
-  color: var(--steel);
+.brand-sub {
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
+  color: var(--steel);
 }
+
+.sync-form { margin: 0; }
 
 .sync-btn {
   font-family: var(--font-mono);
@@ -63,51 +85,115 @@ a { color: inherit; }
   background: var(--ink);
   color: var(--paper);
   border: none;
-  padding: 10px 18px;
+  padding: 11px 20px;
   cursor: pointer;
+  transition: background 0.12s ease;
 }
 .sync-btn:hover { background: var(--stamp-red); }
+.sync-btn:active { transform: translateY(1px); }
 
 main {
-  max-width: 980px;
+  max-width: 1120px;
   margin: 0 auto;
-  padding: 32px 40px 80px;
+  padding: 28px 40px 80px;
 }
+
+/* ------------------------------------------------------------------- flash */
 
 .flash {
   padding: 12px 16px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
   font-size: 13px;
   border-left: 3px solid var(--ink);
-  background: #FFFFFF;
+  background: var(--paper-raised);
 }
 .flash-success { border-left-color: var(--stamp-green); }
 .flash-warning { border-left-color: var(--tape); }
 
-.manifest-header {
-  display: grid;
-  grid-template-columns: 90px 1fr 160px 140px 90px;
-  gap: 12px;
-  padding: 0 14px 10px;
+/* ----------------------------------------------------------------- toolbar */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+
+.filters { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.filter {
+  font-family: var(--font-mono);
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.07em;
+  background: transparent;
+  color: var(--steel);
+  border: 1px solid var(--paper-line);
+  padding: 7px 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  transition: all 0.12s ease;
+}
+.filter:hover { border-color: var(--ink); color: var(--ink); }
+.filter.is-active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+.filter .count {
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.72;
+}
+
+.search { display: block; }
+.search input {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--paper-line);
+  padding: 8px 12px;
+  width: 260px;
+  max-width: 100%;
+}
+.search input:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+.search input::placeholder { color: var(--steel); }
+
+/* -------------------------------------------------------------- lista/grid */
+
+.manifest-header {
+  display: grid;
+  grid-template-columns: var(--cols);
+  gap: 14px;
+  padding: 0 14px 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
   color: var(--steel);
   border-bottom: 1px solid var(--paper-line);
 }
+.manifest-header > :last-child { text-align: right; }
 
 .package-row {
   display: grid;
-  grid-template-columns: 90px 1fr 160px 140px 90px;
-  gap: 12px;
+  grid-template-columns: var(--cols);
+  gap: 14px;
   align-items: center;
-  padding: 16px 14px;
+  padding: 15px 14px;
   border-bottom: 1px solid var(--paper-line);
-  text-decoration: none;
   color: var(--ink);
   transition: background 0.12s ease;
 }
-.package-row:hover { background: #EFEBE0; }
+.package-row:hover { background: var(--paper-hover); }
+.package-row[hidden] { display: none; }
 
 .source-tag {
   font-family: var(--font-display);
@@ -120,20 +206,22 @@ main {
   border: 1px solid currentColor;
 }
 .source-tag.amazon { color: #B8651E; }
-.source-tag.aliexpress { color: #C1432E; }
-.source-tag.correos { color: #2C5F8A; }
+.source-tag.aliexpress { color: var(--stamp-red); }
+.source-tag.correos { color: var(--stamp-blue); }
+.source-tag.gls { color: var(--stamp-violet); }
 
 .pkg-info {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .pkg-thumb {
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   object-fit: contain;
-  background: #FFFFFF;
+  background: var(--paper-raised);
   border: 1px solid var(--paper-line);
   flex-shrink: 0;
 }
@@ -142,39 +230,79 @@ main {
   align-items: center;
   justify-content: center;
   font-family: var(--font-display);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
 .pkg-thumb-fallback.amazon { background: #FFF3E6; color: #B8651E; }
-.pkg-thumb-fallback.aliexpress { background: #FDEDEA; color: #C1432E; }
-.pkg-thumb-fallback.correos { background: #E8F0F7; color: #2C5F8A; }
-.pkg-thumb-fallback.correos { background: #E8F0F7; color: #2C5F8A; }
+.pkg-thumb-fallback.aliexpress { background: #FDEDEA; color: var(--stamp-red); }
+.pkg-thumb-fallback.correos { background: #E8F0F7; color: var(--stamp-blue); }
+.pkg-thumb-fallback.gls { background: #F0EAF7; color: var(--stamp-violet); }
+
+.pkg-text { min-width: 0; }
 
 .pkg-title {
+  display: block;
   font-family: var(--font-display);
   font-size: 15px;
   font-weight: 500;
   color: var(--ink);
-  margin-bottom: 3px;
+  text-decoration: none;
+  margin-bottom: 2px;
+  /* Los títulos de AliExpress son larguísimos; una línea y elipsis. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.pkg-title:hover { color: var(--stamp-red); text-decoration: underline; }
+
 .pkg-id {
   font-size: 11px;
   color: var(--steel);
   letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.pkg-events { opacity: 0.75; }
 
-.status-cell { display: flex; flex-direction: column; gap: 6px; }
+/* ------------------------------------------------------------------ estado */
+
+.status-cell { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 
 .status-label {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-soft);
 }
-.status-label.delivered { color: var(--stamp-green); }
-.status-label.out_for_delivery { color: var(--tape); }
-.status-label.unknown { color: var(--steel); }
+.status-label.ordered          { color: var(--steel); }
+.status-label.shipped          { color: var(--ink-soft); }
+.status-label.customs,
+.status-label.customs_cleared  { color: var(--stamp-violet); }
+.status-label.left_origin,
+.status-label.in_country,
+.status-label.local_carrier,
+.status-label.at_distribution  { color: var(--stamp-blue); }
+.status-label.out_for_delivery { color: #9A7407; }
+.status-label.delivered        { color: var(--stamp-green); }
+.status-label.unknown          { color: var(--steel); }
+
+/* Marca de "estado puesto a mano": los emails ya no lo cambian. */
+.manual-mark {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 4px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  opacity: 0.8;
+  cursor: help;
+}
 
 .progress-track {
   height: 4px;
@@ -183,23 +311,85 @@ main {
 }
 .progress-fill {
   height: 100%;
-  background: var(--ink);
+  background: var(--ink-soft);
+  transition: width 0.2s ease;
 }
-.progress-fill.delivered { background: var(--stamp-green); }
+.progress-fill.customs,
+.progress-fill.customs_cleared  { background: var(--stamp-violet); }
+.progress-fill.left_origin,
+.progress-fill.in_country,
+.progress-fill.local_carrier,
+.progress-fill.at_distribution  { background: var(--stamp-blue); }
+.progress-fill.out_for_delivery { background: var(--tape); }
+.progress-fill.delivered        { background: var(--stamp-green); }
 
 .updated-cell {
   font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.35;
+}
+.updated-cell .hora {
+  display: block;
+  font-size: 11px;
   color: var(--steel);
 }
 
-.events-cell {
-  font-size: 12px;
-  color: var(--steel);
-  text-align: right;
+/* ---------------------------------------------------------------- acciones */
+
+.actions-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
 }
+.actions-cell form { margin: 0; display: flex; }
+
+.status-form select {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--paper-line);
+  padding: 6px 6px;
+  /* Lo justo para que quepan las etiquetas largas
+     ("En centro de distribución") sin recortarlas. */
+  width: 100%;
+  min-width: 0;
+  cursor: pointer;
+}
+.status-form select:hover { border-color: var(--ink); }
+.status-form select:focus { outline: none; border-color: var(--ink); }
+
+.btn-icon {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1;
+  background: transparent;
+  color: var(--steel);
+  border: 1px solid var(--paper-line);
+  padding: 7px 9px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.btn-icon:hover {
+  background: var(--stamp-red);
+  border-color: var(--stamp-red);
+  color: #FFFFFF;
+}
+
+.btn-mini {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 5px 8px;
+  border: 1px solid var(--paper-line);
+  background: var(--paper-raised);
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------- vacío */
 
 .empty-state {
-  padding: 60px 14px;
+  padding: 64px 14px;
   text-align: center;
   color: var(--steel);
 }
@@ -211,8 +401,9 @@ main {
   color: var(--ink);
   margin-bottom: 8px;
 }
+.empty-state .hint { font-size: 12px; opacity: 0.8; }
 
-/* --- detail page --- */
+/* ------------------------------------------------------------- página detalle */
 
 .back-link {
   display: inline-block;
@@ -228,8 +419,28 @@ main {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
   margin-bottom: 20px;
 }
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.detail-actions form { margin: 0; }
+
+.detail-actions select {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--paper-line);
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.detail-actions select:focus { outline: none; border-color: var(--ink); }
 
 .btn-delete {
   font-family: var(--font-mono);
@@ -249,6 +460,7 @@ main {
   padding: 24px;
   margin-bottom: 32px;
   position: relative;
+  background: var(--paper-raised);
 }
 
 .detail-header .badge {
@@ -277,11 +489,10 @@ main {
   width: 72px;
   height: 72px;
   object-fit: contain;
-  background: #FFFFFF;
+  background: var(--paper-raised);
   border: 1px solid var(--paper-line);
   flex-shrink: 0;
 }
-
 .detail-thumb-fallback {
   display: flex;
   align-items: center;
@@ -291,19 +502,21 @@ main {
   font-weight: 700;
 }
 .detail-thumb-fallback.amazon { background: #FFF3E6; color: #B8651E; }
-.detail-thumb-fallback.aliexpress { background: #FDEDEA; color: #C1432E; }
-.detail-thumb-fallback.correos { background: #E8F0F7; color: #2C5F8A; }
+.detail-thumb-fallback.aliexpress { background: #FDEDEA; color: var(--stamp-red); }
+.detail-thumb-fallback.correos { background: #E8F0F7; color: var(--stamp-blue); }
+.detail-thumb-fallback.gls { background: #F0EAF7; color: var(--stamp-violet); }
 
 .detail-header h2 {
   font-family: var(--font-display);
   font-size: 24px;
   font-weight: 600;
   margin: 0 0 14px;
+  overflow-wrap: anywhere;
 }
 
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 16px;
   margin-top: 18px;
 }
@@ -317,16 +530,24 @@ main {
 }
 .detail-field span {
   font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.manual-notice {
+  margin-top: 16px;
+  padding: 10px 14px;
+  font-size: 12px;
+  border-left: 3px solid var(--tape);
+  background: var(--paper);
+  color: var(--ink-soft);
 }
 
 .timeline {
   list-style: none;
-  margin: 0;
+  margin: 0 0 0 8px;
   padding: 0;
   border-left: 2px solid var(--ink);
-  margin-left: 8px;
 }
-
 .timeline li {
   position: relative;
   padding: 0 0 28px 28px;
@@ -346,7 +567,6 @@ main {
   background: var(--stamp-green);
   border-color: var(--stamp-green);
 }
-
 .timeline .t-date {
   font-size: 11px;
   color: var(--steel);
@@ -363,14 +583,56 @@ main {
   font-size: 12px;
   color: var(--steel);
   font-style: italic;
+  overflow-wrap: anywhere;
 }
 
-@media (max-width: 720px) {
-  .topbar, main { padding-left: 18px; padding-right: 18px; }
+/* ------------------------------------------------------------- responsive */
+
+@media (max-width: 900px) {
+  :root { --cols: 74px minmax(0, 1fr) 140px 96px 116px; }
+  main { padding-left: 24px; padding-right: 24px; }
+  .topbar { padding-left: 24px; padding-right: 24px; }
+}
+
+/* Por debajo de esto el grid de 5 columnas deja de tener sentido: cada
+   paquete pasa a ser una ficha apilada. */
+@media (max-width: 700px) {
+  .topbar {
+    padding: 20px 18px 14px;
+    align-items: center;
+  }
+  .topbar h1 { font-size: 22px; }
+  .brand-sub { display: none; }
+  main { padding: 22px 18px 60px; }
+
+  .toolbar { gap: 12px; }
+  .search input { width: 100%; }
+  .search { flex: 1 1 100%; }
+
   .manifest-header { display: none; }
+
   .package-row {
     grid-template-columns: 1fr;
-    gap: 6px;
+    gap: 10px;
+    padding: 16px 14px;
+    border: 1px solid var(--paper-line);
+    background: var(--paper-raised);
+    margin-bottom: 10px;
   }
-  .detail-grid { grid-template-columns: 1fr; }
+  .package-row:hover { background: var(--paper-raised); }
+
+  .cell-source { order: 1; }
+  .pkg-info    { order: 2; }
+  .status-cell { order: 3; }
+  .updated-cell{ order: 4; font-size: 11px; }
+  .updated-cell .hora { display: inline; margin-left: 6px; }
+  .actions-cell{ order: 5; justify-content: flex-start; }
+
+  .status-form select { max-width: none; flex: 1; padding: 9px 8px; font-size: 12px; }
+  .status-form { flex: 1; }
+  .actions-cell { gap: 8px; }
+  .btn-icon { padding: 9px 12px; }
+
+  .detail-header { padding: 18px; }
+  .detail-header h2 { font-size: 20px; }
 }

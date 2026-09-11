@@ -21,7 +21,11 @@ env/
 *.env.local
 
 # IDE
-.vscode/
+.vscode/*
+# ...pero la configuracion de depuracion si se comparte. Ojo: tiene que ser
+# '.vscode/*' y no '.vscode/', porque git no puede reincluir un fichero
+# cuyo directorio padre esta excluido.
+!.vscode/launch.json
 .idea/
 *.swp
 *.swo

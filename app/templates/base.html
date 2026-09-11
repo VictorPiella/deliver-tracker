@@ -3,19 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Paquetes{% endblock %}</title>
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}Paquetes{% endblock %} · Manifiesto</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>📦</text></svg>">
 </head>
 <body>
-  <div class="topbar">
-    <h1>MANIFI<span class="accent">E</span>STO</h1>
-    <div style="display:flex; align-items:center; gap:16px;">
-      <span class="meta">{{ packages_count|default('') }}</span>
-      <form action="{{ url_for('trigger_sync') }}" method="post" style="margin:0;">
-        <button class="sync-btn" type="submit">Escanear ahora</button>
-      </form>
+  <header class="topbar">
+    <div class="brand">
+      <h1>MANIFI<span class="accent">E</span>STO</h1>
+      <span class="brand-sub">Seguimiento de pedidos</span>
     </div>
-  </div>
+    <form action="{{ url_for('trigger_sync') }}" method="post" class="sync-form">
+      <button class="sync-btn" type="submit">Escanear ahora</button>
+    </form>
+  </header>
+
   <main>
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}

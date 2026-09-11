@@ -3,17 +3,41 @@
 {% block content %}
 
 {% if packages %}
+<div class="toolbar">
+  <div class="filters" role="group" aria-label="Filtrar paquetes">
+    <button type="button" class="filter is-active" data-filter="todos">
+      Todos <span class="count">{{ resumen.total }}</span>
+    </button>
+    <button type="button" class="filter" data-filter="transito">
+      En tránsito <span class="count">{{ resumen.en_transito }}</span>
+    </button>
+    <button type="button" class="filter" data-filter="entregados">
+      Entregados <span class="count">{{ resumen.entregados }}</span>
+    </button>
+  </div>
+  <label class="search">
+    <input type="search" id="buscador" placeholder="Buscar producto o nº de envío…"
+           autocomplete="off" spellcheck="false">
+  </label>
+</div>
+
 <div class="manifest-header">
   <div>Origen</div>
   <div>Paquete</div>
   <div>Estado</div>
   <div>Actualizado</div>
-  <div style="text-align:right">Eventos</div>
+  <div>Acciones</div>
 </div>
 
+<div id="lista">
 {% for p in packages %}
-<a class="package-row" href="{{ url_for('package_detail', package_id=p.id) }}">
-  <span class="source-tag {{ p.source }}">{{ p.source }}</span>
+<div class="package-row"
+     data-delivered="{{ 'si' if p.status == 'delivered' else 'no' }}"
+     data-search="{{ ((p.title or '') ~ ' ' ~ (p.external_package_id or '') ~ ' ' ~ (p.courier_tracking_number or '') ~ ' ' ~ p.source)|lower }}">
+
+  <div class="cell-source">
+    <span class="source-tag {{ p.source }}">{{ p.source }}</span>
+  </div>
 
   <div class="pkg-info">
     {% if p.image_url %}
@@ -23,30 +47,111 @@
     {% else %}
     <div class="pkg-thumb pkg-thumb-fallback {{ p.source }}">{{ p.source[:2]|upper }}</div>
     {% endif %}
-    <div>
-      <div class="pkg-title">{{ p.title or '(sin nombre de producto)' }}</div>
-      <div class="pkg-id">#{{ p.external_package_id }}</div>
+    <div class="pkg-text">
+      <a class="pkg-title" href="{{ url_for('package_detail', package_id=p.id) }}">
+        {{ p.title or '(sin nombre de producto)' }}
+      </a>
+      <div class="pkg-id">
+        #{{ p.external_package_id }}
+        <span class="pkg-events">· {{ p.n_events }} evento{{ '' if p.n_events == 1 else 's' }}</span>
+      </div>
     </div>
   </div>
 
   <div class="status-cell">
-    <span class="status-label {{ p.status }}">{{ p.status_label }}</span>
-    <div class="progress-track">
+    <span class="status-label {{ p.status }}">
+      {{ p.status_label }}
+      {% if p.status_is_manual %}<span class="manual-mark" title="Estado fijado a mano: los emails no lo cambiarán">M</span>{% endif %}
+    </span>
+    <div class="progress-track" aria-hidden="true">
       <div class="progress-fill {{ p.status }}" style="width: {{ p.progress_pct }}%;"></div>
     </div>
   </div>
 
-  <div class="updated-cell">{{ p.last_updated.strftime('%d %b %Y, %H:%M') if p.last_updated else '—' }}</div>
+  <div class="updated-cell">
+    {{ p.last_updated.strftime('%d %b %Y') if p.last_updated else '—' }}
+    <span class="hora">{{ p.last_updated.strftime('%H:%M') if p.last_updated else '' }}</span>
+  </div>
 
-  <div class="events-cell">{{ p.n_events }}</div>
-</a>
+  <div class="actions-cell">
+    <form method="POST" action="{{ url_for('set_status_route', package_id=p.id) }}" class="status-form">
+      <select name="status" onchange="this.form.submit()" aria-label="Cambiar estado">
+        {% for valor, etiqueta in estados %}
+        <option value="{{ valor }}" {{ 'selected' if valor == p.status }}>{{ etiqueta }}</option>
+        {% endfor %}
+        {% if p.status_is_manual %}
+        <option value="{{ auto_status }}">↺ Volver a automático</option>
+        {% endif %}
+      </select>
+      <noscript><button type="submit" class="btn-mini">Aplicar</button></noscript>
+    </form>
+
+    <form method="POST" action="{{ url_for('delete_package_route', package_id=p.id) }}"
+          onsubmit="return confirm('¿Eliminar «{{ (p.title or p.external_package_id)|replace("'", "") }}»?\n\nSe borra también su histórico de eventos. No se puede deshacer.');">
+      <button type="submit" class="btn-icon" title="Eliminar paquete" aria-label="Eliminar paquete">✕</button>
+    </form>
+  </div>
+</div>
 {% endfor %}
+</div>
+
+<div class="empty-state" id="sin-resultados" hidden>
+  <div class="stamp">Nada coincide</div>
+  <p>Prueba con otro filtro o término de búsqueda.</p>
+</div>
 
 {% else %}
 <div class="empty-state">
   <div class="stamp">Sin paquetes registrados</div>
-  <p>Cuando lleguen emails de Amazon o AliExpress aparecerán aquí.</p>
+  <p>Cuando lleguen emails de Amazon, AliExpress, GLS o Correos aparecerán aquí.</p>
+  <p class="hint">Pulsa <strong>Escanear ahora</strong> para buscarlos.</p>
 </div>
 {% endif %}
+
+<script>
+  // Filtro y búsqueda en cliente: la lista de un panel doméstico cabe entera en
+  // la página, así que no hace falta ir al servidor para esto.
+  (function () {
+    var lista = document.getElementById('lista');
+    if (!lista) return;
+
+    var filas = Array.prototype.slice.call(lista.querySelectorAll('.package-row'));
+    var botones = Array.prototype.slice.call(document.querySelectorAll('.filter'));
+    var buscador = document.getElementById('buscador');
+    var vacio = document.getElementById('sin-resultados');
+    var filtroActivo = 'todos';
+
+    function aplicar() {
+      var termino = (buscador.value || '').trim().toLowerCase();
+      var visibles = 0;
+
+      filas.forEach(function (fila) {
+        var entregado = fila.dataset.delivered === 'si';
+        var pasaFiltro =
+          filtroActivo === 'todos' ||
+          (filtroActivo === 'entregados' && entregado) ||
+          (filtroActivo === 'transito' && !entregado);
+        var pasaBusqueda = !termino || fila.dataset.search.indexOf(termino) !== -1;
+
+        var mostrar = pasaFiltro && pasaBusqueda;
+        fila.hidden = !mostrar;
+        if (mostrar) visibles++;
+      });
+
+      vacio.hidden = visibles > 0;
+    }
+
+    botones.forEach(function (boton) {
+      boton.addEventListener('click', function () {
+        botones.forEach(function (b) { b.classList.remove('is-active'); });
+        boton.classList.add('is-active');
+        filtroActivo = boton.dataset.filter;
+        aplicar();
+      });
+    });
+
+    buscador.addEventListener('input', aplicar);
+  })();
+</script>
 
 {% endblock %}

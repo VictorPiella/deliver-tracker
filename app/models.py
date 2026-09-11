@@ -8,11 +8,12 @@ Jerarquía:
 - AliExpress: 1 pedido puede partirse en varios paquetes (vimos un caso con 4 productos
   en el mismo paquete, pero el pedido global puede tener más).
 """
-from datetime import datetime
 from sqlalchemy import (
-    create_engine, Column, Integer, String, DateTime, ForeignKey, Text
+    create_engine, inspect, text, Column, Integer, String, Boolean, DateTime, ForeignKey, Text
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+
+from .timeutils import utcnow
 
 Base = declarative_base()
 
@@ -25,7 +26,7 @@ class Order(Base):
     external_order_id = Column(String, nullable=False, index=True)  # 408-XXXXXXX-XXXXXXX / 3074309624382839
     title = Column(String)                            # nombre del primer producto, para mostrar en UI
     image_url = Column(String)                         # URL externa de la imagen del producto, si el email la trae
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     packages = relationship("Package", back_populates="order", cascade="all, delete-orphan")
 
@@ -43,9 +44,14 @@ class Package(Base):
     courier_tracking_number = Column(String)            # si lo conseguimos en el futuro (Correos/GLS real)
     status = Column(String, nullable=False, default="unknown")  # estado normalizado, ver STATUS_* abajo
     status_label_raw = Column(String)                  # texto tal cual vino del email, para debug
+    # Estado puesto a mano desde el panel. Mientras esté activo, la sincronización
+    # sigue guardando los eventos que lleguen por email pero NO toca el estado:
+    # si has marcado algo como entregado porque lo tienes en la mano, un email
+    # que llega tarde no debe devolverlo a "en reparto".
+    status_is_manual = Column(Boolean, nullable=False, default=False)
     eta = Column(String)                                # fecha estimada de entrega si viene en el email (texto libre por ahora)
-    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, default=utcnow, onupdate=utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     order = relationship("Order", back_populates="packages")
     events = relationship("PackageEvent", back_populates="package", cascade="all, delete-orphan", order_by="PackageEvent.event_date")
@@ -61,7 +67,7 @@ class PackageEvent(Base):
     gmail_message_id = Column(String, index=True, unique=True)  # para no reprocesar el mismo email
     gmail_subject = Column(String)
     event_date = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     package = relationship("Package", back_populates="events")
 
@@ -95,12 +101,53 @@ STATUS_LABELS_ES = {
 }
 
 
+# Un engine (y su pool de conexiones) por ruta de base de datos. Antes se creaba
+# uno nuevo en cada get_session(), lo que significaba abrir el fichero y ejecutar
+# create_all() en *cada request* — coste inútil y una fuente de "database is
+# locked" cuando el worker sincronizaba mientras el panel servía una página.
+_ENGINES = {}
+_SESSION_FACTORIES = {}
+
+
 def get_engine(db_path="/data/packages.db"):
-    return create_engine(f"sqlite:///{db_path}", echo=False)
+    engine = _ENGINES.get(db_path)
+    if engine is None:
+        engine = create_engine(
+            f"sqlite:///{db_path}",
+            echo=False,
+            # El worker corre en otro thread que el servidor web y comparte engine.
+            connect_args={"check_same_thread": False},
+        )
+        Base.metadata.create_all(engine)
+        _migrate(engine)
+        _ENGINES[db_path] = engine
+        _SESSION_FACTORIES[db_path] = sessionmaker(bind=engine)
+    return engine
+
+
+# Columnas añadidas después de la primera versión, con el SQL para incorporarlas
+# a una base ya existente. create_all() sólo crea tablas que faltan por completo:
+# a una tabla que ya existe no le añade columnas nuevas, así que sin esto una
+# base creada con una versión anterior reventaría en la primera consulta.
+_MIGRATIONS = [
+    ("packages", "status_is_manual",
+     "ALTER TABLE packages ADD COLUMN status_is_manual BOOLEAN NOT NULL DEFAULT 0"),
+]
+
+
+def _migrate(engine) -> None:
+    inspector = inspect(engine)
+    tablas = set(inspector.get_table_names())
+    for tabla, columna, sql in _MIGRATIONS:
+        if tabla not in tablas:
+            continue
+        if columna in {c["name"] for c in inspector.get_columns(tabla)}:
+            continue
+        with engine.begin() as conn:
+            conn.execute(text(sql))
+        print(f"[models] Migración aplicada: {tabla}.{columna}")
 
 
 def get_session(db_path="/data/packages.db"):
-    engine = get_engine(db_path)
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    return Session()
+    get_engine(db_path)  # asegura engine + tablas creadas
+    return _SESSION_FACTORIES[db_path]()

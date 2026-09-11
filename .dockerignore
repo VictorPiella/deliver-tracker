@@ -1,0 +1,34 @@
+# Sin esto, el build context incluía .venv y .git — cientos de MB que Docker
+# Desktop tiene que copiar a la VM de Linux en cada build. En Windows eso
+# convierte un build de 10s en uno de minutos.
+.venv/
+venv/
+env/
+.git/
+.github/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Datos y secretos: nunca deben acabar dentro de la imagen. Viven en el volumen
+# montado en /data (ver docker-compose.yml).
+data/
+*.db
+*.sqlite3
+credentials.json
+token.json
+token.pickle
+.env
+
+# Artefactos de despliegue (imágenes .tar generadas por deploy/deploy-unraid.ps1)
+deploy/out/
+*.tar
+
+# Editores / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

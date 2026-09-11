@@ -1,0 +1,36 @@
+{
+  // Depuración con breakpoints contra el código que corre DENTRO del container.
+  //
+  // Antes de usarlo:
+  //   1. Pon DEBUGPY=1 en tu .env
+  //   2. docker compose up -d --build
+  //   3. F5 aquí -> "Docker: adjuntar a deliver-tracker"
+  //
+  // pathMappings traduce entre la ruta de Windows y la del container; sin eso
+  // VS Code pone los breakpoints en ficheros que el container no reconoce.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Docker: adjuntar a deliver-tracker",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": { "host": "localhost", "port": 5678 },
+      "pathMappings": [
+        { "localRoot": "${workspaceFolder}/app", "remoteRoot": "/srv/app" },
+        { "localRoot": "${workspaceFolder}/scripts", "remoteRoot": "/srv/scripts" },
+        { "localRoot": "${workspaceFolder}/tests", "remoteRoot": "/srv/tests" }
+      ],
+      "justMyCode": true
+    },
+    {
+      "name": "Tests (en el host)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-q"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}

@@ -18,8 +18,9 @@ inyectadas por quien lo ejecute (en Claude, son las tools Gmail:search_threads /
 Gmail:get_thread; en producción dentro del container, serán llamadas a la API de
 Gmail vía OAuth — ver NOTA_PRODUCCION abajo).
 """
-from datetime import datetime, timedelta
+from datetime import datetime
 from .models import get_session, Package
+from .timeutils import utcnow, to_utc_naive
 from .sync import ingest_event, ingest_carrier_event
 from .parsers import amazon, aliexpress, gls, correos
 
@@ -68,10 +69,15 @@ def is_first_scan(db_path: str) -> bool:
 
 
 def parse_event_date(date_str: str) -> datetime:
+    """
+    Pasa la fecha del email (ISO, normalmente con offset local tipo +02:00) a
+    UTC naive. Sin esta conversión el offset se perdía al guardar en SQLite y
+    cada evento quedaba desplazado 1-2h — ver app/timeutils.py.
+    """
     try:
-        return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        return to_utc_naive(datetime.fromisoformat(date_str.replace("Z", "+00:00")))
     except (ValueError, AttributeError):
-        return datetime.utcnow()
+        return utcnow()
 
 
 def parse_message(sender: str, subject: str, plaintext_body: str, html_body: str, message_id: str, date_str: str):

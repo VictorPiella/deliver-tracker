@@ -1,0 +1,39 @@
+# Desarrollo en Windows. Compose lo carga AUTOMÁTICAMENTE junto a
+# docker-compose.yml, así que `docker compose up --build` ya arranca en modo
+# desarrollo. Para levantar la configuración de producción tal cual:
+#
+#     docker compose -f docker-compose.yml up --build
+#
+# Este fichero NO se copia a Unraid (allí se usa deploy/docker-compose.unraid.yml).
+services:
+  deliver-tracker:
+    build:
+      context: .
+      target: dev
+    image: deliver-tracker:dev
+    volumes:
+      - ./data:/data
+      # El código se monta desde el host: al guardar en el editor, el reloader
+      # de Flask reinicia el servidor dentro del container. No hace falta
+      # rebuild para cambiar código (sí para cambiar requirements.txt).
+      - ./app:/srv/app:ro
+      - ./scripts:/srv/scripts:ro
+      - ./tests:/srv/tests:ro
+    environment:
+      # En desarrollo, por defecto, contra los emails de ejemplo de mock_gmail.py:
+      # no toca tu Gmail real. Pon USE_MOCK_GMAIL=false en .env cuando quieras
+      # probar contra la cuenta de verdad.
+      USE_MOCK_GMAIL: "${USE_MOCK_GMAIL:-true}"
+      # El worker horario no aporta nada mientras desarrollas y sólo ensucia el
+      # log; el botón "Escanear ahora" del panel sincroniza igual.
+      ENABLE_BACKGROUND_WORKER: "${ENABLE_BACKGROUND_WORKER:-false}"
+      FLASK_DEBUG: "1"
+      # Pon DEBUGPY=1 en .env para poder engancharte con VS Code al puerto
+      # de abajo (ver .vscode/launch.json). DEBUGPY_WAIT=1 hace que la app
+      # no arranque hasta que te enganches — útil para depurar el arranque.
+      DEBUGPY: "${DEBUGPY:-0}"
+      DEBUGPY_WAIT: "${DEBUGPY_WAIT:-0}"
+    ports:
+      - "${HOST_PORT:-5000}:5000"
+      # Puerto de debugpy — ver "Depurar con VS Code" en el README.
+      - "${DEBUG_PORT:-5678}:5678"

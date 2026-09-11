@@ -16,6 +16,40 @@ def status_rank(status: str) -> int:
         return -1  # 'unknown' u otros no listados van antes que todo, nunca pisan nada
 
 
+def apply_status(package, nuevo_status: str) -> bool:
+    """
+    Aplica un estado venido de un email al Package, si procede. Devuelve True si
+    lo ha cambiado.
+
+    Dos reglas:
+    - Un estado fijado a mano desde el panel manda sobre lo que digan los emails.
+      El evento se guarda igual (queda en el histórico), pero el estado no se toca.
+    - Si no, el estado sólo avanza: un email que llega desordenado o repetido no
+      rebobina un paquete ya entregado.
+    """
+    if package.status_is_manual:
+        return False
+    if package.status == "unknown" or status_rank(nuevo_status) >= status_rank(package.status):
+        package.status = nuevo_status
+        return True
+    return False
+
+
+def recompute_status_from_events(package) -> str:
+    """
+    Recalcula el estado a partir de los eventos guardados, que es lo que hay que
+    hacer al soltar un estado manual: se vuelve al que dicen los emails, no al
+    que había antes de tocarlo.
+    """
+    if not package.events:
+        return package.status
+    mejor = max(package.events, key=lambda e: (status_rank(e.status), e.event_date))
+    package.status = mejor.status
+    package.status_label_raw = mejor.status_label_raw
+    package.last_updated = mejor.event_date
+    return mejor.status
+
+
 def get_or_create_order(session, source: str, external_order_id: str, title: str | None, image_url: str | None = None) -> Order:
     order = (
         session.query(Order)
@@ -113,9 +147,9 @@ def ingest_event(session, event: dict) -> bool:
     )
     session.add(pe)
 
-    # Actualiza el estado "actual" del package solo si es un avance (o si el actual es 'unknown')
-    if package.status == "unknown" or status_rank(event["status"]) >= status_rank(package.status):
-        package.status = event["status"]
+    # Actualiza el estado "actual" del package solo si es un avance (o si el actual
+    # es 'unknown'), y nunca si lo has fijado a mano desde el panel.
+    if apply_status(package, event["status"]):
         package.status_label_raw = event["status_label_raw"]
         package.last_updated = event["event_date"]
 
@@ -173,8 +207,7 @@ def ingest_carrier_event(session, event: dict, courier: str) -> bool:
     )
     session.add(pe)
 
-    if package.status == "unknown" or status_rank(event["status"]) >= status_rank(package.status):
-        package.status = event["status"]
+    if apply_status(package, event["status"]):
         package.status_label_raw = event["status_label_raw"]
         package.last_updated = event["event_date"]
 

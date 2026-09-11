@@ -1,0 +1,15 @@
+# Este repo se edita en Windows (core.autocrlf=true) y se ejecuta en Linux
+# dentro del container. Sin esto, cualquier script de shell o entrypoint se
+# checkoutea con CRLF y el container falla con el clásico
+# "exec /entrypoint.sh: no such file or directory".
+* text=auto eol=lf
+
+*.ps1   text eol=crlf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.db    binary
+*.tar   binary
