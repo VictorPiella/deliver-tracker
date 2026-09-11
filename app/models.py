@@ -188,13 +188,42 @@ def get_engine(db_path="/data/packages.db"):
             f"sqlite:///{db_path}",
             echo=False,
             # El worker corre en otro thread que el servidor web y comparte engine.
-            connect_args={"check_same_thread": False},
+            connect_args={"check_same_thread": False, "timeout": 15},
         )
+        _afinar_sqlite(engine)
         Base.metadata.create_all(engine)
         _migrate(engine)
         _ENGINES[db_path] = engine
         _SESSION_FACTORIES[db_path] = sessionmaker(bind=engine)
     return engine
+
+
+def _afinar_sqlite(engine) -> None:
+    """
+    WAL + espera ante bloqueos, en cada conexión nueva.
+
+    Desde que el escaneo corre en un hilo aparte, hay un escritor (el escaneo,
+    que puede tardar minutos) a la vez que lectores (cada página que sirves). En
+    el modo `delete` por defecto, un escritor bloquea a TODOS los lectores: el
+    panel se queda colgado mientras dura el escaneo y acaba dando "database is
+    locked". Con WAL, lectores y escritor conviven sin estorbarse.
+
+    El PRAGMA va por conexión, no por base, así que hay que ponerlo en cada una;
+    `journal_mode=WAL` sí es persistente en el fichero, pero repetirlo no cuesta
+    nada y deja el código honesto sobre lo que hace falta.
+    """
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "connect")
+    def _configurar(dbapi_conn, _record):
+        cursor = dbapi_conn.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")   # suficiente con WAL
+            cursor.execute("PRAGMA busy_timeout=15000")   # esperar, no reventar
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
 
 
 # Columnas añadidas después de la primera versión, con el SQL para incorporarlas

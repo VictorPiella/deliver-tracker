@@ -227,8 +227,9 @@ bueno.
 Como viven dentro del volumen que ya montas, entran solas en el backup de
 appdata de Unraid.
 
-El escaneo corre **en segundo plano**: el botón contesta al instante y el panel se
-actualiza solo al terminar. Antes corría dentro de la propia petición, y tras un
+El escaneo corre **en segundo plano**: el botón contesta al instante, gira
+mientras dura (también si lo ha lanzado el worker horario, no sólo tú) y el panel
+se recarga solo al terminar. Antes corría dentro de la propia petición, y tras un
 parón largo la ventana adaptativa puede pedir hasta un año de correo — más que
 el timeout de gunicorn.
 
@@ -404,6 +405,7 @@ Se leen de `.env` (copia `.env.example`).
 - [x] Escaneo en segundo plano, sin timeouts
 - [x] Fusionar entradas duplicadas (Correos)
 - [x] Contraseña opcional del panel
+- [x] SQLite en modo WAL: el panel responde mientras el escaneo escribe
 
 ## Próximos pasos
 

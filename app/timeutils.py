@@ -64,3 +64,23 @@ def a_zona_local(dt: datetime | None) -> datetime | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(_zona_local())
+
+
+# strftime('%b') depende del locale del sistema, y dentro del container el
+# locale es C: el panel, que está en español, pintaba "Jan", "Aug", "Dec".
+# Instalar locales españoles en la imagen por tres letras es desproporcionado,
+# así que se traducen aquí.
+MESES_ES = [
+    "ene", "feb", "mar", "abr", "may", "jun",
+    "jul", "ago", "sep", "oct", "nov", "dic",
+]
+
+
+def formatear(dt: datetime, patron: str) -> str:
+    """
+    Como strftime, pero con los meses en español. Sustituye %b antes de pasar
+    el resto a strftime, para que el locale no tenga ni voz ni voto.
+    """
+    if "%b" in patron:
+        patron = patron.replace("%b", MESES_ES[dt.month - 1])
+    return dt.strftime(patron)

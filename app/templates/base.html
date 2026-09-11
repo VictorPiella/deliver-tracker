@@ -66,13 +66,13 @@
         </button>
 
         <form action="{{ url_for('trigger_sync') }}" method="post" class="sync-form">
-          <button class="btn btn-primary" type="submit">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <button class="btn btn-primary sync-btn" type="submit" id="sync-btn">
+            <svg class="sync-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8"/>
               <path d="M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/>
             </svg>
-            <span>Escanear</span>
+            <span class="sync-label">Escanear</span>
           </button>
         </form>
       </div>
@@ -90,67 +90,69 @@
     {% block content %}{% endblock %}
   </main>
 
-  <div class="sync-toast" id="sync-toast" hidden>
-    <span class="spinner" aria-hidden="true"></span>
-    <span>Escaneando el correo…</span>
-  </div>
-
   <script>
-    // El escaneo corre en segundo plano; se sondea hasta que acaba y se
-    // recarga para enseñar lo que haya entrado.
+    // El escaneo corre en segundo plano. Se sondea para animar el botón
+    // mientras dura y recargar al terminar — incluido cuando lo ha lanzado el
+    // worker horario y no tú.
     (function () {
-      var toast = document.getElementById('sync-toast');
-      if (!toast) return;
-      var estabaCorriendo = false;
+      var boton = document.getElementById('sync-btn');
+      if (!boton) return;
+
+      var etiqueta = boton.querySelector('.sync-label');
+      var textoOriginal = etiqueta.textContent;
+      var RAPIDO = 1200;    // mientras escanea, para recargar pronto al acabar
+      var LENTO = 15000;    // en reposo, sólo para enterarse del escaneo del worker
+      var corriendo = false;
       var temporizador = null;
+
+      function pintar(activo) {
+        if (activo === corriendo) return;
+        corriendo = activo;
+        boton.classList.toggle('is-syncing', activo);
+        boton.disabled = activo;
+        boton.setAttribute('aria-busy', activo ? 'true' : 'false');
+        etiqueta.textContent = activo ? 'Escaneando' : textoOriginal;
+      }
+
+      function programar(ms) {
+        clearTimeout(temporizador);
+        // Si la pestaña no se ve, no tiene sentido seguir preguntando.
+        if (document.hidden) return;
+        temporizador = setTimeout(sondear, ms);
+      }
 
       function sondear() {
         fetch('{{ url_for("api_sync_status") }}', { cache: 'no-store' })
           .then(function (r) { return r.json(); })
           .then(function (estado) {
-            toast.hidden = !estado.running;
             if (estado.running) {
-              estabaCorriendo = true;
-              temporizador = setTimeout(sondear, 1500);
-            } else if (estabaCorriendo) {
+              pintar(true);
+              programar(RAPIDO);
+            } else if (corriendo) {
+              // Acaba de terminar: recargar para enseñar lo que haya entrado.
               window.location.reload();
+            } else {
+              programar(LENTO);
             }
           })
           .catch(function () {
-            // Sin conexión con el panel: se deja de sondear en silencio.
-            toast.hidden = true;
-            if (temporizador) clearTimeout(temporizador);
+            // Sin conexión con el panel: dejar el botón usable y reintentar luego.
+            pintar(false);
+            programar(LENTO);
           });
       }
 
+      // Al enviar el formulario se anima ya, sin esperar al primer sondeo.
+      boton.form.addEventListener('submit', function () {
+        pintar(true);
+        programar(400);
+      });
+
+      document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) sondear();
+      });
+
       sondear();
-      document.querySelectorAll('.sync-form').forEach(function (f) {
-        f.addEventListener('submit', function () {
-          toast.hidden = false;
-          estabaCorriendo = true;
-          setTimeout(sondear, 800);
-        });
-      });
-    })();
-  </script>
-
-  <script>
-    (function () {
-      var boton = document.getElementById('tema-toggle');
-      if (!boton) return;
-
-      function actual() {
-        var guardado = null;
-        try { guardado = localStorage.getItem('tema'); } catch (e) {}
-        if (guardado) return guardado;
-        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      }
-
-      boton.addEventListener('click', function () {
-        var nuevo = actual() === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', nuevo);
-        try { localStorage.setItem('tema', nuevo); } catch (e) {}
-      });
     })();
   </script>
 </body>

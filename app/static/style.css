@@ -1095,45 +1095,44 @@ main {
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
 
+/* ------------------------------------------------- boton de escaneo */
 
-/* --------------------------------------------------- aviso de escaneo */
+/* Mientras dura el escaneo el icono gira y el boton queda bloqueado: es lo
+   unico que indica que hay algo pasando, porque el escaneo corre en segundo
+   plano y la pagina no se queda cargando. */
+.sync-btn .sync-icon { transition: transform 0.2s ease; }
 
-/* El escaneo corre en segundo plano; este aviso es lo unico que indica que
-   algo esta pasando mientras tanto. */
-.sync-toast {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  font-size: 13px;
-  font-weight: 520;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r);
-  box-shadow: var(--shadow-md);
+.sync-btn.is-syncing {
+  cursor: progress;
+  /* Sin esto el botón se vería apagado, como si estuviera roto, justo cuando
+     está trabajando. */
+  opacity: 1;
 }
+.sync-btn.is-syncing .sync-icon {
+  animation: girar 1s linear infinite;
+}
+.sync-btn:disabled { pointer-events: none; }
 
-.spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--border-strong);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: girar 0.7s linear infinite;
-  flex-shrink: 0;
+/* El ancho de la etiqueta cambia entre "Escanear" y "Escaneando", y el botón
+   pegaba un salto. Se reserva el ancho del texto más largo. */
+.sync-label {
+  display: inline-block;
+  /* Reserva el ancho de "Escaneando", que es más largo que "Escanear": sin
+     esto el botón pega un salto justo al pulsarlo. */
+  min-width: 10ch;
+  text-align: left;
 }
 
 @keyframes girar { to { transform: rotate(360deg); } }
 
-/* Sin esto el aviso se ve SIEMPRE: el `display: flex` de arriba es una regla de
-   autor y gana al `display: none` que el navegador aplica a [hidden]. */
-.sync-toast[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  /* Sin giro, pero el estado tiene que seguir notándose de alguna forma. */
+  .sync-btn.is-syncing .sync-icon { animation: none; }
+  .sync-btn.is-syncing { outline: 2px dashed currentColor; outline-offset: 2px; }
+}
 
 @media (max-width: 760px) {
-  .sync-toast { right: 12px; left: 12px; bottom: 12px; justify-content: center; }
+  /* En movil el boton solo enseña el icono: la etiqueta no cabe. */
+  .sync-label { display: none; }
+  .sync-btn { padding: 9px 12px; }
 }

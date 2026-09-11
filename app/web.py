@@ -23,7 +23,7 @@ from .models import (
     get_last_sync, get_session, Package, UnparsedEmail,
     STATUS_LABELS_ES, STATUS_ORDER,
 )
-from .timeutils import utcnow, a_zona_local
+from .timeutils import utcnow, a_zona_local, formatear
 from .gmail_sync import run_sync
 from .cleanup import hard_delete_package, restore_package, soft_delete_package
 from .sync import merge_packages, recompute_status_from_events
@@ -61,7 +61,7 @@ def formato_local(momento, patron: str = "%d %b %Y · %H:%M") -> str:
     """
     if momento is None:
         return "—"
-    return a_zona_local(momento).strftime(patron)
+    return formatear(a_zona_local(momento), patron)
 
 
 def humanizar_antiguedad(momento) -> str:
