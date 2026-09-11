@@ -97,7 +97,7 @@ La imagen se construye **en Windows** y se empuja a Unraid por SSH. Unraid no
 compila nada y no hace falta ningún registro de imágenes.
 
 ```powershell
-.\deploy\deploy-unraid.ps1 -UnraidHost 192.168.1.10
+.\deploy\deploy-unraid.ps1 -UnraidHost TU_IP
 ```
 
 El script hace: `docker build` → `docker save` → `scp` → `docker load` →
@@ -146,7 +146,7 @@ como *Only allow keys*, que es más restrictiva y suficiente para esto).
 **3. Comprueba que entra sin contraseña:**
 
 ```bash
-ssh -o BatchMode=yes root@192.168.1.10 "echo conexion OK"
+ssh -o BatchMode=yes root@TU_IP "echo conexion OK"
 ```
 
 Si eso imprime `conexion OK`, ya está.
@@ -157,7 +157,7 @@ Si eso imprime `conexion OK`, ya está.
 `deploy/docker-compose.unraid.yml` si no es 99:100:
 
 ```bash
-ssh root@192.168.1.10 "mkdir -p /mnt/user/appdata/deliver-tracker && ls -ldn /mnt/user/appdata/deliver-tracker"
+ssh root@TU_IP "mkdir -p /mnt/user/appdata/deliver-tracker && ls -ldn /mnt/user/appdata/deliver-tracker"
 ```
 
 > Esto importa más de lo que parece. La imagen crea su usuario con uid 1000,
@@ -172,13 +172,21 @@ ssh root@192.168.1.10 "mkdir -p /mnt/user/appdata/deliver-tracker && ls -ldn /mn
 **Copia las credenciales de Gmail** al volumen (no van dentro de la imagen):
 
 ```bash
-scp data/credentials.json data/token.json root@192.168.1.10:/mnt/user/appdata/deliver-tracker/
+scp data/credentials.json data/token.json root@TU_IP:/mnt/user/appdata/deliver-tracker/
+```
+
+**Comprueba que el puerto del host esta libre.** El compose publica el panel en
+`5055` en vez de en `5000`, porque en este servidor el 5000 ya lo ocupa Frigate.
+Si en el tuyo estuviera ocupado tambien el 5055, cambialo en el compose:
+
+```bash
+ssh root@TU_IP "ss -lnt | grep ':5055 '"     # sin salida = libre
 ```
 
 **Despliega:**
 
 ```powershell
-.\deploy\deploy-unraid.ps1 -UnraidHost 192.168.1.10
+.\deploy\deploy-unraid.ps1 -UnraidHost TU_IP
 ```
 
 La primera vez copia también el compose. **Edita entonces `FLASK_SECRET_KEY`**
@@ -189,14 +197,14 @@ lo que edites allí):
 python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-El panel queda en `http://192.168.1.10:5000`.
+El panel queda en `http://TU_IP:5055` (el script te lo dice al terminar, leyendo el puerto del compose).
 
 ### Actualizar
 
 La misma orden. Sólo se reconstruye lo que haya cambiado:
 
 ```powershell
-.\deploy\deploy-unraid.ps1 -UnraidHost 192.168.1.10
+.\deploy\deploy-unraid.ps1 -UnraidHost TU_IP
 ```
 
 Opciones: `-User`, `-RemoteDir`, `-Tag`, `-SkipCompose` (sólo carga la imagen).
@@ -263,7 +271,7 @@ docker compose up -d --build
 Copia los dos ficheros al volumen persistente y asegúrate de que el compose de allí tiene `USE_MOCK_GMAIL: "false"`:
 
 ```powershell
-scp data\credentials.json data\token.json root@192.168.1.10:/mnt/user/appdata/deliver-tracker/
+scp data\credentials.json data\token.json root@TU_IP:/mnt/user/appdata/deliver-tracker/
 ```
 
 > **Nota:** los parsers buscan remitentes de **`amazon.es`**. Si tu cuenta es de otro dominio (`amazon.com`, `amazon.fr`…), añade esos remitentes a `AMAZON_SENDERS` en `app/gmail_sync.py` y al mapa `SENDER_STATUS_MAP` en `app/parsers/amazon.py`.

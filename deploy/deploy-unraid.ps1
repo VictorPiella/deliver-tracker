@@ -44,7 +44,13 @@ param(
     [switch]$SkipCompose
 )
 
-$ErrorActionPreference = "Stop"
+# OJO con poner esto en "Stop": en Windows PowerShell 5.1, cuando un ejecutable
+# nativo escribe en stderr, PowerShell lo envuelve en un ErrorRecord
+# (NativeCommandError) y con "Stop" eso aborta el script — aunque el programa
+# haya terminado con exito. `docker build` saca todo su progreso por stderr, asi
+# que el script moria en el primer build. La senal fiable de un nativo es su
+# codigo de salida, y para eso esta Invoke-Nativo.
+$ErrorActionPreference = "Continue"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $OutDir   = Join-Path $PSScriptRoot "out"
@@ -54,13 +60,37 @@ $Remote   = "$User@$UnraidHost"
 function Step($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Fail($msg) { Write-Host "ERROR: $msg" -ForegroundColor Red; exit 1 }
 
+# Ejecuta un comando nativo y comprueba SU CODIGO DE SALIDA, que es lo unico
+# fiable. No usar $? con nativos: en PS 5.1 basta con que escriban en stderr
+# para que $? sea $false aunque hayan ido bien.
+function Invoke-Nativo {
+    param(
+        [Parameter(Mandatory = $true)][string]$Programa,
+        [Parameter(Mandatory = $true)][string[]]$Argumentos,
+        [string]$SiFalla = "El comando fallo.",
+        [switch]$Silencioso
+    )
+    # NO se redirige stderr. En cuanto se hace 2>&1, PS 5.1 envuelve cada linea
+    # de stderr en un ErrorRecord, y al imprimirlas salen como
+    # "System.Management.Automation.RemoteException" en vez del texto. Dejando
+    # que el programa escriba directo en la consola, se ve tal cual. Con
+    # $ErrorActionPreference = "Continue" eso no aborta el script, y la unica
+    # senal que se mira es el codigo de salida.
+    if ($Silencioso) {
+        & $Programa @Argumentos *> $null
+    } else {
+        & $Programa @Argumentos
+    }
+    if ($LASTEXITCODE -ne 0) { Fail "$SiFalla (codigo $LASTEXITCODE)" }
+}
+
 # --- Comprobaciones previas -------------------------------------------------
 Step "Comprobando requisitos"
-docker info --format '{{.ServerVersion}}' *> $null
-if (-not $?) { Fail "Docker no responde. Arranca Docker Desktop y reintenta." }
+Invoke-Nativo docker @('info', '--format', '{{.ServerVersion}}') -Silencioso `
+    -SiFalla "Docker no responde. Arranca Docker Desktop y reintenta."
 
 & ssh -o BatchMode=yes -o ConnectTimeout=8 $Remote "echo ok" *> $null
-if (-not $?) {
+if ($LASTEXITCODE -ne 0) {
     Fail @"
 No se pudo conectar por SSH a $Remote sin contraseña.
 Copia tu clave publica a Unraid primero:
@@ -74,34 +104,31 @@ Write-Host "    Docker OK, SSH a $Remote OK"
 Step "Construyendo $Tag (target prod, linux/amd64)"
 Push-Location $RepoRoot
 try {
-    docker build --platform linux/amd64 --target prod -t $Tag .
-    if ($LASTEXITCODE -ne 0) { Fail "El build fallo." }
+    Invoke-Nativo docker @('build', '--platform', 'linux/amd64', '--target', 'prod', '-t', $Tag, '.') `
+        -SiFalla "El build fallo."
 } finally {
     Pop-Location
 }
 
-$size = docker image inspect $Tag --format '{{.Size}}'
+$size = & docker image inspect $Tag --format '{{.Size}}'
 Write-Host ("    Imagen construida: {0:N0} MB" -f ($size / 1MB))
 
 # --- Exportar ---------------------------------------------------------------
 Step "Exportando imagen a $TarPath"
 if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir | Out-Null }
-docker save -o $TarPath $Tag
-if ($LASTEXITCODE -ne 0) { Fail "docker save fallo." }
+Invoke-Nativo docker @('save', '-o', $TarPath, $Tag) -SiFalla "docker save fallo."
 Write-Host ("    {0:N0} MB en disco" -f ((Get-Item $TarPath).Length / 1MB))
 
 # --- Copiar y cargar --------------------------------------------------------
 Step "Copiando a Unraid y cargando la imagen"
-& ssh $Remote "mkdir -p $RemoteDir"
-if (-not $?) { Fail "No se pudo crear $RemoteDir en Unraid." }
+Invoke-Nativo ssh @($Remote, "mkdir -p $RemoteDir") -SiFalla "No se pudo crear $RemoteDir en Unraid."
 
 # /tmp de Unraid vive en RAM. Un tar de ~200 MB cabe de sobra, y se borra solo
 # al reiniciar, pero lo limpiamos igualmente al terminar.
-& scp $TarPath "${Remote}:/tmp/deliver-tracker.tar"
-if (-not $?) { Fail "scp fallo." }
+Invoke-Nativo scp @($TarPath, "${Remote}:/tmp/deliver-tracker.tar") -SiFalla "scp fallo."
 
-& ssh $Remote "docker load -i /tmp/deliver-tracker.tar && rm -f /tmp/deliver-tracker.tar"
-if (-not $?) { Fail "docker load fallo en Unraid." }
+Invoke-Nativo ssh @($Remote, "docker load -i /tmp/deliver-tracker.tar && rm -f /tmp/deliver-tracker.tar") `
+    -SiFalla "docker load fallo en Unraid."
 
 # --- Compose ----------------------------------------------------------------
 if ($SkipCompose) {
@@ -120,17 +147,21 @@ if ($exists.Trim() -eq "yes") {
     Write-Host "    Ya existe un docker-compose.yml remoto; se respeta tal cual." -ForegroundColor Yellow
     Write-Host "    Si quieres reemplazarlo:  scp deploy\docker-compose.unraid.yml ${Remote}:$RemoteDir/docker-compose.yml"
 } else {
-    & scp $ComposeSrc "${Remote}:$RemoteDir/docker-compose.yml"
-    if (-not $?) { Fail "No se pudo copiar el compose." }
+    Invoke-Nativo scp @($ComposeSrc, "${Remote}:$RemoteDir/docker-compose.yml") `
+        -SiFalla "No se pudo copiar el compose."
     Write-Host "    Compose copiado. EDITA FLASK_SECRET_KEY antes de exponerlo." -ForegroundColor Yellow
 }
 
 Step "Levantando el container"
-& ssh $Remote "cd $RemoteDir && docker compose up -d"
-if (-not $?) { Fail "docker compose up fallo en Unraid." }
+Invoke-Nativo ssh @($Remote, "cd $RemoteDir && docker compose up -d") `
+    -SiFalla "docker compose up fallo en Unraid."
 
 Step "Estado"
 & ssh $Remote "cd $RemoteDir && docker compose ps"
 
-Write-Host "`nListo. Panel en http://${UnraidHost}:5000" -ForegroundColor Green
+# El puerto se lee del compose remoto en vez de darlo por hecho: en este
+# servidor el 5000 ya lo ocupa Frigate y el panel sale por otro.
+$puerto = & ssh $Remote "grep -oE '[0-9]+:5000' $RemoteDir/docker-compose.yml | head -1 | cut -d: -f1"
+if ([string]::IsNullOrWhiteSpace($puerto)) { $puerto = "5000" }
+Write-Host "`nListo. Panel en http://${UnraidHost}:${puerto}" -ForegroundColor Green
 Write-Host "Logs:  ssh $Remote 'cd $RemoteDir && docker compose logs -f'"
