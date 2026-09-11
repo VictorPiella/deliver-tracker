@@ -8,6 +8,8 @@ Jerarquía:
 - AliExpress: 1 pedido puede partirse en varios paquetes (vimos un caso con 4 productos
   en el mismo paquete, pero el pedido global puede tener más).
 """
+from datetime import datetime
+
 from sqlalchemy import (
     create_engine, inspect, text, Column, Integer, String, Boolean, DateTime, ForeignKey, Text
 )
@@ -55,6 +57,52 @@ class Package(Base):
 
     order = relationship("Order", back_populates="packages")
     events = relationship("PackageEvent", back_populates="package", cascade="all, delete-orphan", order_by="PackageEvent.event_date")
+
+
+class AppSetting(Base):
+    """
+    Pares clave/valor de la propia app. Ahora mismo guarda una sola cosa, la
+    fecha del último escaneo con éxito, que es lo que permite calcular cuánto
+    hay que mirar hacia atrás la próxima vez (ver gmail_sync.compute_lookback_days).
+    """
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(String)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+LAST_SYNC_KEY = "last_sync_at"
+
+
+def get_setting(session, key: str) -> str | None:
+    row = session.get(AppSetting, key)
+    return row.value if row is not None else None
+
+
+def set_setting(session, key: str, value: str) -> None:
+    row = session.get(AppSetting, key)
+    if row is None:
+        session.add(AppSetting(key=key, value=value))
+    else:
+        row.value = value
+        row.updated_at = utcnow()
+
+
+def get_last_sync(session) -> datetime | None:
+    crudo = get_setting(session, LAST_SYNC_KEY)
+    if not crudo:
+        return None
+    try:
+        return datetime.fromisoformat(crudo)
+    except ValueError:
+        return None
+
+
+def set_last_sync(session, momento: datetime | None = None) -> datetime:
+    momento = momento or utcnow()
+    set_setting(session, LAST_SYNC_KEY, momento.isoformat())
+    return momento
 
 
 class PackageEvent(Base):

@@ -363,7 +363,27 @@ main {
 
 /* --------------------------------------------------------------- buscador */
 
-.list-bar { margin-bottom: 14px; }
+.list-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.list-bar .search { flex: 1; min-width: 0; }
+
+/* Cuánto hace del último escaneo. Con el worker parado, esto es lo único que
+   delata que el panel lleva tiempo sin actualizarse. */
+.last-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: default;
+}
+.last-sync svg { width: 14px; height: 14px; }
 
 .search {
   position: relative;
@@ -880,6 +900,9 @@ main {
   .stat { padding: 12px 13px; border-radius: var(--r); }
   .stat-value { font-size: 21px; }
   .stat-label { font-size: 11px; }
+
+  .list-bar { flex-wrap: wrap-reverse; gap: 10px; }
+  .last-sync { width: 100%; }
 
   .list-head { display: none; }
 

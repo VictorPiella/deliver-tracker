@@ -24,6 +24,12 @@ services:
       ENABLE_BACKGROUND_WORKER: "${ENABLE_BACKGROUND_WORKER:-true}"
       FLASK_SECRET_KEY: "${FLASK_SECRET_KEY:-change-me-in-production}"
       TZ: "${TZ:-Europe/Madrid}"
+      # Ventana de busqueda en Gmail. La normal es adaptativa (cubre el hueco
+      # desde el ultimo escaneo con exito); estas son sus cotas. Ver README.
+      GMAIL_FIRST_SCAN_DAYS: "${GMAIL_FIRST_SCAN_DAYS:-30}"
+      GMAIL_MIN_LOOKBACK_DAYS: "${GMAIL_MIN_LOOKBACK_DAYS:-14}"
+      GMAIL_MAX_LOOKBACK_DAYS: "${GMAIL_MAX_LOOKBACK_DAYS:-365}"
+      SYNC_INTERVAL_MINUTES: "${SYNC_INTERVAL_MINUTES:-60}"
       # Integración Home Assistant (MQTT Discovery). Desactivada por defecto;
       # pon MQTT_ENABLED=true y rellena el resto para publicar cada paquete
       # como sensor en HA.

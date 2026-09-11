@@ -186,6 +186,72 @@ Arriba, las tres tarjetas de recuento (*Total / En tránsito / Entregados*) hace
 
 El panel sigue el **tema del sistema** (claro/oscuro) y el botón de la cabecera permite forzar uno; la elección se guarda en `localStorage`. El diseño es responsive: por debajo de 760px cada paquete pasa a ser una ficha apilada con controles a tamaño de dedo.
 
+## Qué escanea, y qué pasa si borras los emails
+
+El escaneo pide a Gmail una única query **filtrada sólo por remitente** — nunca por asunto ni por palabras clave:
+
+```
+(from:auto-confirm@amazon.es OR from:confirmar-envio@amazon.es OR
+ from:shipment-tracking@amazon.es OR from:order-update@amazon.es)
+OR from:transaction@notice.aliexpress.com
+OR from:gls-spain.com
+OR from:correos.com
+newer_than:<N>d
+```
+
+En Amazon, **el remitente ES el estado** (una dirección distinta por tipo de evento).
+En AliExpress hay un solo remitente y el estado sale del asunto. GLS y Correos se
+filtran por dominio y su estado sale de frases del cuerpo.
+
+### Borrar emails
+
+**La base de datos es la fuente de verdad, no Gmail.** Un evento ya escaneado es una
+fila permanente en `package_events`; el sync **sólo añade**, nunca reconcilia ni borra.
+
+| Acción sobre el correo | Efecto en el panel |
+|---|---|
+| Borras emails **ya escaneados** | Ninguno. Los paquetes, estados e histórico siguen ahí |
+| **Archivas** emails (los sacas de la bandeja) | Ninguno. La búsqueda de Gmail los sigue encontrando |
+| Borras un email **antes** de que se escanee | Ese evento se pierde para siempre |
+| Mueves a la **papelera** | Equivale a borrarlo: la API no busca en papelera ni en spam |
+
+Lo único irrecuperable es lo que se borra antes de escanearse. Como el worker corre
+cada hora, esa ventana de riesgo es de una hora.
+
+> Lo que sí conviene respaldar es `packages.db`. Si lo pierdes y ya has borrado los
+> emails, el histórico no se puede reconstruir.
+
+### La ventana de búsqueda
+
+`newer_than:<N>d` **no limita cuánto tiempo puede durar un envío**: un paquete de
+AliExpress de 6 semanas acumula sus eventos según van llegando, y cada uno se escanea
+como mucho una hora después de llegar. La ventana sólo decide cuánto correo *antiguo*
+se mira en cada pasada.
+
+`N` es adaptativo:
+
+| Situación | Ventana |
+|---|---|
+| Primer escaneo (nunca sincronizado) | `GMAIL_FIRST_SCAN_DAYS`, por defecto **30 días** |
+| Escaneo normal (última sync reciente) | `GMAIL_MIN_LOOKBACK_DAYS`, por defecto **14 días** |
+| Tras un parón | **todo el hueco** desde la última sync + 2 días de margen |
+| Parón enorme | Tope de `GMAIL_MAX_LOOKBACK_DAYS`, por defecto **365 días** |
+
+Es decir: si el container está apagado tres meses, al arrancar pide 92 días y recupera
+lo que se perdió. Reprocesar de más no cuesta nada porque la deduplicación por
+`gmail_message_id` descarta lo ya visto.
+
+La fecha del último escaneo con éxito se guarda en la tabla `app_settings` y se muestra
+en el panel (*"Último escaneo: hace 12 min"*). **Sólo avanza si el escaneo terminó sin
+error**: si Gmail falla a mitad, el marcador se queda donde estaba y el siguiente intento
+vuelve a cubrir la misma ventana.
+
+Para una importación inicial más profunda, antes del primer escaneo:
+
+```bash
+GMAIL_FIRST_SCAN_DAYS=90 docker compose up -d --build
+```
+
 ## Estados normalizados
 
 Los estados de los emails se normalizan a un conjunto común, en orden de progreso:
@@ -249,6 +315,10 @@ Se leen de `.env` (copia `.env.example`).
 | `TZ` | `Europe/Madrid` | Zona horaria del container |
 | `GMAIL_CREDENTIALS_PATH` | `<dir de DB_PATH>/credentials.json` | `credentials.json` de Google Cloud Console |
 | `GMAIL_TOKEN_PATH` | `<dir de DB_PATH>/token.json` | Token OAuth generado por `scripts/gmail_auth.py` |
+| `GMAIL_FIRST_SCAN_DAYS` | `30` | Días hacia atrás en el primer escaneo |
+| `GMAIL_MIN_LOOKBACK_DAYS` | `14` | Suelo de la ventana en escaneos normales |
+| `GMAIL_MAX_LOOKBACK_DAYS` | `365` | Techo de la ventana tras un parón largo |
+| `SYNC_INTERVAL_MINUTES` | `60` | Cada cuánto sincroniza el worker |
 | `MQTT_ENABLED` | `false` | `true` para publicar a Home Assistant |
 | `MQTT_HOST` | `localhost` | Host del broker MQTT |
 | `MQTT_PORT` | `1883` | Puerto del broker MQTT |

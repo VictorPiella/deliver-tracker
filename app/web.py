@@ -19,7 +19,8 @@ from flask import (
     Flask, current_app, g, render_template, jsonify, redirect, request, url_for, flash
 )
 
-from .models import get_session, Package, STATUS_LABELS_ES, STATUS_ORDER
+from .models import get_last_sync, get_session, Package, STATUS_LABELS_ES, STATUS_ORDER
+from .timeutils import utcnow
 from .gmail_sync import run_sync
 from .cleanup import delete_package
 from .sync import recompute_status_from_events
@@ -47,6 +48,28 @@ def get_gmail_adapters(use_mock: bool):
         return mock_search_fn, mock_get_thread_fn
     from .gmail_oauth import gmail_search_fn, gmail_get_thread_fn
     return gmail_search_fn, gmail_get_thread_fn
+
+
+def humanizar_antiguedad(momento) -> str:
+    """
+    "hace 12 min" / "hace 3 h" / "hace 2 días". Sirve para que se vea de un
+    vistazo si el worker lleva parado más de la cuenta.
+    """
+    if momento is None:
+        return "nunca"
+    segundos = (utcnow() - momento).total_seconds()
+    if segundos < 0:
+        return "hace un momento"
+    minutos = segundos / 60
+    if minutos < 2:
+        return "hace un momento"
+    if minutos < 60:
+        return f"hace {int(minutos)} min"
+    horas = minutos / 60
+    if horas < 24:
+        return f"hace {int(horas)} h"
+    dias = int(horas / 24)
+    return f"hace {dias} día{'' if dias == 1 else 's'}"
 
 
 def status_progress_pct(status: str) -> int:
@@ -127,12 +150,15 @@ def register_routes(app: Flask) -> None:
             "en_transito": sum(1 for p in data if p["status"] != "delivered"),
             "entregados": sum(1 for p in data if p["status"] == "delivered"),
         }
+        ultimo = get_last_sync(g.db)
         return render_template(
             "index.html",
             packages=data,
             resumen=resumen,
             estados=[(s, STATUS_LABELS_ES[s]) for s in STATUS_ORDER],
             auto_status=AUTO_STATUS,
+            ultimo_escaneo=ultimo,
+            ultimo_escaneo_rel=humanizar_antiguedad(ultimo),
         )
 
     @app.route("/package/<int:package_id>")

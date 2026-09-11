@@ -19,6 +19,13 @@
 </section>
 
 <div class="list-bar">
+  <span class="last-sync" {% if ultimo_escaneo %}title="{{ ultimo_escaneo.strftime('%d/%m/%Y %H:%M') }} UTC"{% endif %}>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+    </svg>
+    Último escaneo: {{ ultimo_escaneo_rel }}
+  </span>
   <label class="search">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
          stroke-linecap="round" aria-hidden="true">

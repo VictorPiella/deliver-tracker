@@ -252,10 +252,9 @@ class TestQueryDeBusqueda:
         assert build_search_query(10).endswith("newer_than:10d")
         assert build_search_query(14).endswith("newer_than:14d")
 
-    def test_el_primer_escaneo_mira_menos_atras_que_los_siguientes(self):
-        # Primer escaneo acotado para no importar años de historial de golpe;
-        # después, ventana más ancha por si el worker estuvo parado.
-        from app.gmail_sync import FIRST_SCAN_DAYS, LOOKBACK_DAYS, SYNC_INTERVAL_MINUTES
-        assert FIRST_SCAN_DAYS < LOOKBACK_DAYS
-        # La ventana tiene que cubrir de sobra el intervalo del worker.
-        assert LOOKBACK_DAYS * 24 * 60 > SYNC_INTERVAL_MINUTES * 4
+    def test_el_primer_escaneo_cubre_los_paquetes_ya_en_vuelo(self):
+        # Un paquete de AliExpress tarda de 2 a 5 semanas: la ventana del primer
+        # escaneo tiene que dar para recoger los que ya estén en camino cuando
+        # conectas la cuenta por primera vez.
+        from app.gmail_sync import FIRST_SCAN_DAYS
+        assert FIRST_SCAN_DAYS >= 21

@@ -3,12 +3,24 @@ gmail_sync.py — conecta Gmail con el pipeline de parsers + sync.
 
 Diseño:
 - Construye una query de Gmail que cubre los remitentes conocidos de Amazon y AliExpress.
-- En el PRIMER escaneo (cuando la base está vacía), limita a los últimos N días
-  (FIRST_SCAN_DAYS) para no importar años de historial de golpe.
-- En escaneos posteriores, no hace falta limitar por fecha: la deduplicación por
-  gmail_message_id en sync.ingest_event ya evita reprocesar lo visto, así que
-  basta con volver a pedir un rango razonablemente amplio (LOOKBACK_DAYS) para
-  capturar ediciones tardías sin reprocesar todo el histórico cada vez.
+- En el PRIMER escaneo limita a los últimos FIRST_SCAN_DAYS días, para no
+  importar años de historial de golpe.
+- En escaneos posteriores la ventana es ADAPTATIVA: se calcula desde la fecha
+  del último escaneo con éxito (guardada en la base), más un margen. Antes era
+  un valor fijo de 14 días, y eso dejaba un agujero real: si el container
+  estaba parado más de dos semanas, los emails llegados durante el parón ya
+  quedaban fuera de la ventana al volver, y no se recuperaban nunca. Ahora un
+  parón de tres meses se recupera solo en el primer escaneo tras arrancar.
+- Reprocesar de más no cuesta nada: la deduplicación por gmail_message_id en
+  sync.ingest_event descarta lo ya visto.
+
+IMPORTANTE sobre borrar correo: la base de datos es la fuente de verdad, no
+Gmail. Un evento ya ingerido es una fila permanente; el sync sólo añade, nunca
+reconcilia ni borra. Puedes borrar los emails una vez escaneados sin perder
+nada del panel. Lo que sí se pierde para siempre es un email borrado ANTES de
+que le diera tiempo a escanearse. Ojo además con que la API de Gmail no busca
+en la papelera (includeSpamTrash es false por defecto): mover a la papelera
+equivale a borrar de cara al escaneo. Archivar, en cambio, es inocuo.
 - Pensado para ejecutarse periódicamente (ver SYNC_INTERVAL_MINUTES) o bajo demanda
   desde el botón "Escanear ahora" del panel.
 
@@ -18,18 +30,37 @@ inyectadas por quien lo ejecute (en Claude, son las tools Gmail:search_threads /
 Gmail:get_thread; en producción dentro del container, serán llamadas a la API de
 Gmail vía OAuth — ver NOTA_PRODUCCION abajo).
 """
+import os
 from datetime import datetime
-from .models import get_session, Package
+
+from .models import get_last_sync, get_session, set_last_sync, Package
 from .timeutils import utcnow, to_utc_naive
 from .sync import ingest_event, ingest_carrier_event
 from .parsers import amazon, aliexpress, gls, correos
 
 # --- Configuración ---
-FIRST_SCAN_DAYS = 10       # cuántos días hacia atrás mirar en el primerísimo escaneo
-LOOKBACK_DAYS = 14         # ventana de búsqueda en escaneos normales (margen de sobra
-                            # sobre el intervalo real, así no se pierde nada si el
-                            # worker estuvo parado un tiempo)
-SYNC_INTERVAL_MINUTES = 60 # frecuencia del worker en background
+# Todas ajustables por entorno; los valores por defecto sirven para un uso normal.
+
+# Cuánto mirar hacia atrás en el primerísimo escaneo. 30 días cubre de sobra los
+# paquetes de AliExpress que ya estén en vuelo al conectar la cuenta por primera
+# vez (suelen tardar 2-5 semanas). Súbelo puntualmente para una importación
+# inicial más profunda: GMAIL_FIRST_SCAN_DAYS=90.
+FIRST_SCAN_DAYS = int(os.environ.get("GMAIL_FIRST_SCAN_DAYS", "30"))
+
+# Suelo de la ventana adaptativa: aunque el último escaneo fuera hace diez
+# minutos, se piden siempre al menos estos días por si algún email entró con
+# fecha anterior a la de su llegada.
+MIN_LOOKBACK_DAYS = int(os.environ.get("GMAIL_MIN_LOOKBACK_DAYS", "14"))
+
+# Techo: evita que un parón larguísimo dispare una query que se traiga medio
+# buzón. Un año es más que suficiente para un panel de paquetes.
+MAX_LOOKBACK_DAYS = int(os.environ.get("GMAIL_MAX_LOOKBACK_DAYS", "365"))
+
+# Margen que se añade al hueco desde el último escaneo, para cubrir desfases de
+# reloj y emails que llegan con retraso.
+LOOKBACK_MARGIN_DAYS = 2
+
+SYNC_INTERVAL_MINUTES = int(os.environ.get("SYNC_INTERVAL_MINUTES", "60"))
 
 AMAZON_SENDERS = [
     "auto-confirm@amazon.es",
@@ -61,11 +92,22 @@ def build_search_query(newer_than_days: int) -> str:
     return query
 
 
-def is_first_scan(db_path: str) -> bool:
-    session = get_session(db_path)
-    count = session.query(Package).count()
-    session.close()
-    return count == 0
+def compute_lookback_days(session) -> tuple[int, bool]:
+    """
+    Devuelve (días a mirar hacia atrás, es_primer_escaneo).
+
+    Si nunca se ha sincronizado con éxito, ventana de primer escaneo. Si sí, se
+    cubre todo el hueco desde entonces más un margen, acotado entre
+    MIN_LOOKBACK_DAYS y MAX_LOOKBACK_DAYS. Así un container que ha estado
+    semanas apagado recupera lo que se perdió en cuanto vuelve.
+    """
+    ultimo = get_last_sync(session)
+    if ultimo is None:
+        return FIRST_SCAN_DAYS, True
+
+    hueco = (utcnow() - ultimo).total_seconds() / 86400
+    dias = int(hueco) + LOOKBACK_MARGIN_DAYS
+    return max(MIN_LOOKBACK_DAYS, min(dias, MAX_LOOKBACK_DAYS)), False
 
 
 def parse_event_date(date_str: str) -> datetime:
@@ -109,14 +151,13 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
 
     Devuelve un resumen: {'scanned': N, 'ingested': N, 'skipped': N}
     """
-    first_scan = is_first_scan(db_path)
-    days = FIRST_SCAN_DAYS if first_scan else LOOKBACK_DAYS
+    session = get_session(db_path)
+    days, first_scan = compute_lookback_days(session)
     query = build_search_query(days)
 
     log(f"[gmail_sync] {'Primer escaneo' if first_scan else 'Escaneo periódico'}, "
         f"ventana={days}d, query={query!r}")
 
-    session = get_session(db_path)
     scanned = 0
     ingested = 0
     skipped = 0
@@ -191,8 +232,20 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
             else:
                 skipped += 1
 
+    # Sólo se marca el escaneo como hecho si se ha llegado hasta aquí sin
+    # excepción. Si Gmail falla a mitad, el marcador no avanza y el siguiente
+    # intento vuelve a cubrir la misma ventana.
+    momento = set_last_sync(session)
+    session.commit()
     session.close()
-    summary = {"scanned": scanned, "ingested": ingested, "skipped": skipped}
+
+    summary = {
+        "scanned": scanned,
+        "ingested": ingested,
+        "skipped": skipped,
+        "lookback_days": days,
+        "synced_at": momento,
+    }
     log(f"[gmail_sync] Resumen: {summary}")
     return summary
 

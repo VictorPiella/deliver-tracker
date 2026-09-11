@@ -28,6 +28,16 @@ services:
       DB_PATH: /data/packages.db
       TZ: Europe/Madrid
 
+      # Ventana de busqueda en Gmail. La normal es adaptativa: cubre todo el
+      # hueco desde el ultimo escaneo con exito, asi que si el servidor esta
+      # apagado unas semanas, al volver recupera lo que se perdio. Sube
+      # GMAIL_FIRST_SCAN_DAYS antes del PRIMER escaneo si quieres importar mas
+      # historial de golpe (p.ej. "90").
+      GMAIL_FIRST_SCAN_DAYS: "30"
+      GMAIL_MIN_LOOKBACK_DAYS: "14"
+      GMAIL_MAX_LOOKBACK_DAYS: "365"
+      SYNC_INTERVAL_MINUTES: "60"
+
       # false = Gmail real. Requiere credentials.json y token.json dentro de
       # /mnt/user/appdata/deliver-tracker/ (ver README, "Conectar Gmail real").
       # Ponlo en true para arrancar con datos de ejemplo y comprobar que el
