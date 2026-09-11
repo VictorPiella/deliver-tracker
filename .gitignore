@@ -40,6 +40,12 @@ Thumbs.db
 # Database
 *.db
 *.sqlite3
+# Ficheros auxiliares que crea SQLite en modo WAL. Sin esto se colaban en los
+# commits cada vez que la app tocaba la base.
+*.db-wal
+*.db-shm
+*.db-journal
+data/backups/
 
 # Credentials / tokens
 credentials.json
