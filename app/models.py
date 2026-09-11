@@ -58,7 +58,13 @@ class Package(Base):
     # no se reingiere) y ademas el borrado es reversible desde la papelera.
     deleted_at = Column(DateTime, index=True)
     eta = Column(String)                                # fecha estimada de entrega (texto libre del email)
-    last_updated = Column(DateTime, default=utcnow, onupdate=utcnow)
+    # SIN onupdate a proposito. Con el, CUALQUIER escritura en la fila reescribia
+    # la fecha: restaurar un paquete de la papelera, aprender su transportista o
+    # guardarle el tracking lo dejaba como "actualizado ahora mismo", aunque el
+    # paquete llevara semanas quieto. La columna significa "cuando se movio el
+    # paquete por ultima vez", asi que se pone a mano donde eso ocurre de verdad:
+    # al aplicar un evento (sync.ingest_*) y al cambiar el estado a mano.
+    last_updated = Column(DateTime, default=utcnow)
     created_at = Column(DateTime, default=utcnow)
 
     order = relationship("Order", back_populates="packages")

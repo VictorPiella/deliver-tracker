@@ -145,6 +145,27 @@ def merge_packages(session, origen: Package, destino: Package) -> int:
     return movidos
 
 
+def reparar_last_updated(session, log=print) -> int:
+    """
+    Recalcula last_updated desde los eventos. Repara las filas que quedaron con
+    la fecha equivocada mientras la columna tenia onupdate (ver models.Package):
+    cualquier escritura la ponia "ahora", asi que el panel las ordenaba mal y la
+    columna "Actualizado" mentia.
+    """
+    arreglados = 0
+    for package in session.query(Package).all():
+        if not package.events:
+            continue
+        real = max(e.event_date for e in package.events)
+        if package.last_updated != real:
+            package.last_updated = real
+            arreglados += 1
+    if arreglados:
+        session.commit()
+        log(f"[sync] last_updated recalculado en {arreglados} paquete(s)")
+    return arreglados
+
+
 def get_or_create_order(session, source: str, external_order_id: str, title: str | None, image_url: str | None = None) -> Order:
     order = (
         session.query(Order)

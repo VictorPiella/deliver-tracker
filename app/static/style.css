@@ -374,6 +374,9 @@ svg { display: block; }
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 .icon-btn svg { width: 16px; height: 16px; }
+/* El boton de "abrir seguimiento" es un <a>, no un <button>: sin esto no se
+   alinea igual dentro de la fila. */
+a.icon-btn { text-decoration: none; box-sizing: border-box; }
 .icon-btn:hover { background: var(--surface-hover); color: var(--text); border-color: var(--border-strong); }
 
 .icon-btn-danger:hover {

@@ -313,3 +313,68 @@ class TestGlsQueNoSePuedeEnlazar:
         assert segundo["ingested"] == 0
         assert segundo["duplicated"] == 1
         assert get_session(db_path).query(Package).count() == 1
+
+
+class TestLastUpdatedNoSeMueveSola:
+    """
+    La columna significa "cuando se movió el paquete", no "cuando se escribió la
+    fila". Con onupdate=utcnow, restaurar un paquete de la papelera o aprenderle
+    el transportista lo dejaba como "actualizado ahora mismo" aunque llevara
+    semanas quieto — y el panel, que ordena por esa fecha, mentía.
+    """
+
+    def _paquete(self, session, **kw):
+        base = {
+            "source": "amazon", "order_id": "408-9-9", "package_id": "ENVIO9",
+            "status": "shipped", "status_label_raw": "Enviado", "title": "Cosa",
+            "image_url": None, "message_id": "m1", "event_date": EVENT_DATE,
+        }
+        base.update(kw)
+        ingest_event(session, base)
+        return session.query(Package).one()
+
+    def test_un_evento_si_la_actualiza(self, session):
+        p = self._paquete(session)
+        assert p.last_updated == EVENT_DATE
+
+    def test_restaurar_de_la_papelera_no_la_toca(self, session):
+        from app.cleanup import restore_package, soft_delete_package
+
+        p = self._paquete(session)
+        antes = p.last_updated
+
+        soft_delete_package(session, p, log=lambda *a: None)
+        session.commit()
+        restore_package(session, session.query(Package).one())
+        session.commit()
+
+        assert session.query(Package).one().last_updated == antes
+
+    def test_aprender_el_transportista_no_la_toca(self, session):
+        p = self._paquete(session)
+        antes = p.last_updated
+
+        p.courier = "correos"
+        p.courier_tracking_number = "PQ1"
+        session.commit()
+
+        assert session.query(Package).one().last_updated == antes
+
+    def test_la_reparacion_la_recalcula_desde_los_eventos(self, session):
+        from datetime import timedelta
+
+        from app.sync import reparar_last_updated
+
+        p = self._paquete(session)
+        # Se estropea a mano, como hacia el onupdate.
+        p.last_updated = EVENT_DATE + timedelta(days=30)
+        session.commit()
+
+        assert reparar_last_updated(session, log=lambda *a: None) == 1
+        assert session.query(Package).one().last_updated == EVENT_DATE
+
+    def test_la_reparacion_no_toca_lo_que_ya_esta_bien(self, session):
+        from app.sync import reparar_last_updated
+
+        self._paquete(session)
+        assert reparar_last_updated(session, log=lambda *a: None) == 0

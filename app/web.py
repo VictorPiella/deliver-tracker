@@ -29,6 +29,7 @@ from .timeutils import utcnow, a_zona_local, formatear
 from .gmail_sync import run_sync
 from .cleanup import hard_delete_package, restore_package, soft_delete_package
 from .sync import merge_packages, recompute_status_from_events
+from .tracking import url_de_seguimiento, url_del_transportista
 from .mqtt_publish import publish_all_packages, unpublish_package
 
 # Valor especial del desplegable de estado: suelta el estado manual y vuelve a
@@ -263,6 +264,12 @@ def register_routes(app: Flask) -> None:
             "n_events": len(p.events),
             "courier_tracking_number": p.courier_tracking_number,
             "eta": p.eta,
+            "url_seguimiento": url_de_seguimiento(
+                p.source,
+                p.order.external_order_id if p.order else None,
+                p.external_package_id,
+                p.courier_tracking_number,
+            ),
         } for p in packages]
 
         # "Finalizado" incluye los cancelados: un pedido cancelado no está en
@@ -312,6 +319,18 @@ def register_routes(app: Flask) -> None:
             "courier": p.courier,
             "courier_tracking_number": p.courier_tracking_number,
             "eta": p.eta,
+            "url_seguimiento": url_de_seguimiento(
+                p.source,
+                p.order.external_order_id if p.order else None,
+                p.external_package_id,
+                p.courier_tracking_number,
+            ),
+            # Si lo reparte otro (un Amazon que trae Correos), su pagina tambien
+            # sirve, y suele estar mas al dia que la de la tienda.
+            "url_transportista": (
+                url_del_transportista(p.courier, p.courier_tracking_number)
+                if (p.courier or "").lower() != p.source.lower() else None
+            ),
         }
         candidatos = [{
             "id": otro.id,
@@ -477,6 +496,9 @@ def register_routes(app: Flask) -> None:
             p.status = nuevo
             p.status_is_manual = True
             p.status_label_raw = "Marcado a mano desde el panel"
+            # Cambiarlo a mano SI es un movimiento del paquete, asi que la fecha
+            # se pone explicitamente (la columna ya no lo hace sola).
+            p.last_updated = utcnow()
             g.db.commit()
             flash(f"Estado cambiado a «{STATUS_LABELS_ES[nuevo]}».", "success")
         else:
