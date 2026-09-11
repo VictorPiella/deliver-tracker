@@ -16,6 +16,16 @@ def status_rank(status: str) -> int:
         return -1  # 'unknown' u otros no listados van antes que todo, nunca pisan nada
 
 
+def evento_ya_visto(session, message_id: str) -> bool:
+    """
+    ¿Se ha procesado ya este email? Los ingest_* devuelven False tanto para un
+    duplicado como para un evento que no se ha podido colgar de ningún paquete,
+    y quien llama necesita distinguirlos: en el segundo caso hay que intentar un
+    plan B, en el primero no.
+    """
+    return session.query(PackageEvent).filter_by(gmail_message_id=message_id).first() is not None
+
+
 def evento_anclable(event: dict) -> bool:
     """
     ¿Tiene el evento algún identificador al que agarrarse?

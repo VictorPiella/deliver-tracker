@@ -14,9 +14,11 @@ importar el módulo. Dos motivos:
   worker desactivado, sin depender de variables de entorno globales.
 """
 import os
+import secrets
 
 from flask import (
-    Flask, current_app, g, render_template, jsonify, redirect, request, url_for, flash
+    Flask, current_app, g, render_template, jsonify, redirect, request, session,
+    url_for, flash,
 )
 
 from .models import (
@@ -129,6 +131,44 @@ def _instalar_auth(app: Flask, password: str) -> None:
         )
 
 
+# Rutas que aceptan POST sin token: el healthcheck no manda ninguno y no hace
+# nada destructivo.
+RUTAS_SIN_CSRF = {"healthz"}
+
+
+def _instalar_csrf(app: Flask) -> None:
+    """
+    Token anti-CSRF para todo POST.
+
+    Sin esto, cualquier pagina web que visites puede enviar en tu nombre un
+    formulario a http://<tu-unraid>:5055/package/7/delete y borrarte paquetes:
+    el navegador hace la peticion igual, y el panel no tiene forma de saber que
+    no salio de el. Con contrasena tampoco bastaria, porque el navegador manda
+    las credenciales de HTTP Basic sin preguntar.
+
+    El token va en la sesion (cookie firmada) y como campo oculto en cada
+    formulario. Una peticion de otro origen no puede leer la cookie, asi que no
+    puede acertar el campo.
+    """
+    @app.before_request
+    def _comprobar_csrf():
+        if request.method != "POST" or request.endpoint in RUTAS_SIN_CSRF:
+            return None
+        if app.config.get("TESTING"):
+            return None
+        enviado = request.form.get("csrf_token", "")
+        esperado = session.get("csrf_token", "")
+        if not esperado or not secrets.compare_digest(enviado, esperado):
+            return "Token de seguridad no valido. Recarga la pagina.", 400
+        return None
+
+    @app.context_processor
+    def _dar_token():
+        if "csrf_token" not in session:
+            session["csrf_token"] = secrets.token_urlsafe(32)
+        return {"csrf_token": session["csrf_token"]}
+
+
 def create_app(db_path: str | None = None, use_mock_gmail: bool | None = None,
                enable_worker: bool | None = None) -> Flask:
     app = Flask(__name__)
@@ -174,6 +214,10 @@ def create_app(db_path: str | None = None, use_mock_gmail: bool | None = None,
             if exc is not None:
                 db.rollback()
             db.close()
+
+    # La cookie de sesion, solo para peticiones del propio sitio.
+    app.config.update(SESSION_COOKIE_SAMESITE="Lax", SESSION_COOKIE_HTTPONLY=True)
+    _instalar_csrf(app)
 
     app.jinja_env.filters["local"] = formato_local
 
@@ -324,7 +368,7 @@ def register_routes(app: Flask) -> None:
         if p is None:
             return "Paquete no encontrado", 404
 
-        soft_delete_package(g.db, p)
+        soft_delete_package(g.db, p, motivo=f"boton del panel desde {request.remote_addr}")
         g.db.commit()
         unpublish_package(package_id)
         flash("Paquete movido a la papelera.", "success", )

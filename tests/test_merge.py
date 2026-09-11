@@ -134,7 +134,9 @@ class TestMergeNoResucita:
 
 class TestRutaDeFusion:
     def _app(self, db_path):
-        return create_app(db_path=db_path, use_mock_gmail=True, enable_worker=False)
+        app = create_app(db_path=db_path, use_mock_gmail=True, enable_worker=False)
+        app.config["TESTING"] = True
+        return app
 
     def test_fusiona_desde_el_panel(self, db_path):
         from conftest import sincronizar

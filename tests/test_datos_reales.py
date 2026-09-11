@@ -8,7 +8,7 @@ perfectamente normales.
 """
 from datetime import datetime
 
-from app.models import Order, Package, STATUS_CANCELLED
+from app.models import Order, Package, STATUS_CANCELLED, get_session
 from app.parsers import amazon, correos, gls
 from app.sync import apply_status, ingest_event
 
@@ -200,3 +200,116 @@ class TestTitulosDeLosAsuntosNuevos:
     def test_los_prefijos_de_siempre_siguen_funcionando(self):
         assert amazon.clean_title('En reparto: “JSAUX mag-Safe Cargador...”') == "JSAUX mag-Safe Cargador..."
         assert amazon.clean_title('Enviado: "WOLTU Mesitas de Noche, Set..."') == "WOLTU Mesitas de Noche, Set..."
+
+
+class TestGlsQueNoSePuedeEnlazar:
+    """
+    GLS sólo reparte, no vende, así que lo ideal es enganchar su evento al
+    paquete de la tienda. Pero cuando no hay a qué engancharlo, el evento se
+    descartaba en silencio: ni salía en el panel ni contaba como "sin
+    reconocer". Los cuatro emails de GLS del buzón real desaparecían así.
+    """
+
+    CUERPO_VGL = (
+        "Hola! Tu pedido 1349764642 de VGL INTERNATIONAL TRADE MARKET SL con "
+        "Nº de seguimiento GLS 1349764642 está en camino."
+    )
+    CUERPO_ALI = (
+        "Hola! Tu pedido 315193141453520012 de Ecommerce con Nº de seguimiento "
+        "GLS 1316197997 está en camino."
+    )
+
+    def _parse(self, cuerpo, mid="g1"):
+        return gls.parse("noreply@comunicaciones.gls-spain.com", "Tu envío",
+                         cuerpo, mid, FECHA)
+
+    def test_si_el_pedido_es_el_propio_tracking_no_hay_referencia_de_tienda(self):
+        # GLS a veces repite su nº de seguimiento donde iría la referencia de la
+        # tienda. Buscar un paquete por él no encontraría nada nunca.
+        r = self._parse(self.CUERPO_VGL)
+        assert r["package_id"] is None
+        assert r["tracking_number"] == "1349764642"
+
+    def test_una_referencia_de_tienda_de_verdad_si_se_conserva(self):
+        r = self._parse(self.CUERPO_ALI)
+        assert r["package_id"] == "315193141453520012"
+        assert r["tracking_number"] == "1316197997"
+
+    def test_se_extrae_el_nombre_de_la_tienda(self):
+        assert self._parse(self.CUERPO_VGL)["tienda"] == "VGL INTERNATIONAL TRADE MARKET SL"
+        assert self._parse(self.CUERPO_ALI)["tienda"] == "Ecommerce"
+
+    def test_la_entrada_propia_lleva_tracking_y_tienda(self):
+        entrada = gls.como_entrada_propia(self._parse(self.CUERPO_VGL))
+        assert entrada["source"] == "gls"
+        assert entrada["courier"] == "gls"
+        assert entrada["courier_tracking_number"] == "1349764642"
+        assert entrada["title"] == "VGL INTERNATIONAL TRADE MARKET SL"
+        assert entrada["package_id"] == "1349764642"
+
+    def test_un_envio_sin_paquete_al_que_engancharse_acaba_en_el_panel(self, db_path):
+        from app.gmail_sync import run_sync
+
+        mensajes = [{
+            "id": "gls-vgl", "subject": "Tu envío 1349764642 está en camino",
+            "sender": "GLS <noreply@comunicaciones.gls-spain.com>",
+            "date": "2026-09-01T10:00:00+00:00",
+        }]
+        resumen = run_sync(db_path, lambda q: mensajes,
+                           lambda m: {"plaintext_body": self.CUERPO_VGL, "html_body": ""},
+                           log=lambda *a: None)
+
+        assert resumen["ingested"] == 1
+        s = get_session(db_path)
+        p = s.query(Package).one()
+        assert p.source == "gls"
+        assert p.courier_tracking_number == "1349764642"
+        assert p.status == "local_carrier"
+        assert p.order.title == "VGL INTERNATIONAL TRADE MARKET SL"
+        s.close()
+
+    def test_si_el_paquete_de_la_tienda_existe_se_engancha_a_el(self, db_path):
+        # El camino bueno: no se crea entrada propia, se enriquece el paquete
+        # que ya seguimos.
+        from app.gmail_sync import run_sync
+
+        s = get_session(db_path)
+        ingest_event(s, {
+            "source": "aliexpress", "order_id": "3074309624382839",
+            "package_id": "315193141453520012", "status": "in_country",
+            "status_label_raw": "en tu pais", "title": "Tapón colador",
+            "image_url": None, "message_id": "ali-1", "event_date": EVENT_DATE,
+        })
+        s.close()
+
+        run_sync(db_path, lambda q: [{
+            "id": "gls-ali", "subject": "Tu envío está en camino",
+            "sender": "GLS <noreply@comunicaciones.gls-spain.com>",
+            "date": "2026-09-01T10:00:00+00:00",
+        }], lambda m: {"plaintext_body": self.CUERPO_ALI, "html_body": ""},
+            log=lambda *a: None)
+
+        s = get_session(db_path)
+        assert s.query(Package).count() == 1        # sigue habiendo UNO
+        p = s.query(Package).one()
+        assert p.source == "aliexpress"             # el de la tienda, no uno de GLS
+        assert p.courier == "gls"
+        assert p.courier_tracking_number == "1316197997"
+        s.close()
+
+    def test_reescanear_no_duplica_la_entrada_propia(self, db_path):
+        from app.gmail_sync import run_sync
+
+        mensajes = [{
+            "id": "gls-vgl", "subject": "Tu envío está en camino",
+            "sender": "GLS <noreply@comunicaciones.gls-spain.com>",
+            "date": "2026-09-01T10:00:00+00:00",
+        }]
+        cuerpo = lambda m: {"plaintext_body": self.CUERPO_VGL, "html_body": ""}
+
+        run_sync(db_path, lambda q: mensajes, cuerpo, log=lambda *a: None)
+        segundo = run_sync(db_path, lambda q: mensajes, cuerpo, log=lambda *a: None)
+
+        assert segundo["ingested"] == 0
+        assert segundo["duplicated"] == 1
+        assert get_session(db_path).query(Package).count() == 1

@@ -13,6 +13,7 @@
   </div>
   <form method="POST" action="{{ url_for('vaciar_papelera') }}"
         onsubmit="return confirm('¿Vaciar la papelera?\n\nSe borrarán definitivamente {{ packages|length }} paquete(s) y su histórico. Esto sí es irreversible.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit" class="btn btn-danger">Vaciar papelera</button>
   </form>
 </div>
@@ -52,10 +53,12 @@
 
   <div class="pkg-actions">
     <form method="POST" action="{{ url_for('restore_package_route', package_id=p.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="btn btn-ghost btn-sm">Restaurar</button>
     </form>
     <form method="POST" action="{{ url_for('purge_package_route', package_id=p.id) }}"
           onsubmit="return confirm('¿Borrar definitivamente?\n\nSe pierde el histórico. Si los emails de origen siguen en Gmail dentro de la ventana de búsqueda, el paquete volverá a aparecer en el próximo escaneo.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="icon-btn icon-btn-danger" title="Borrar definitivamente" aria-label="Borrar definitivamente">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
              stroke-linecap="round" stroke-linejoin="round">

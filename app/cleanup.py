@@ -27,10 +27,21 @@ from .mqtt_publish import unpublish_package
 PURGE_DELIVERED_AFTER_DAYS = int(os.environ.get("PURGE_DELIVERED_AFTER_DAYS", "30"))
 
 
-def soft_delete_package(session, package: Package) -> None:
-    """Manda un paquete a la papelera. Reversible con restore_package()."""
+def soft_delete_package(session, package: Package, motivo: str = "sin especificar",
+                        log=print) -> None:
+    """
+    Manda un paquete a la papelera. Reversible con restore_package().
+
+    Se deja rastro en el log a proposito. Una vez aparecieron 11 paquetes en la
+    papelera sin que la purga automatica pudiera haberlos elegido (varios ni
+    siquiera estaban entregados), y no hubo forma de saber quien los habia
+    mandado alli: el container se habia recreado y sus logs ya no estaban.
+    """
     if package.deleted_at is None:
         package.deleted_at = utcnow()
+        log(f"[cleanup] A la papelera: id={package.id} "
+            f"({package.source}/{package.external_package_id}) "
+            f"estado={package.status} motivo={motivo}")
 
 
 def restore_package(session, package: Package) -> None:
@@ -89,7 +100,9 @@ def purge_old_delivered(db_path: str, log=print) -> int:
         .all()
     )
     for package in viejos:
-        soft_delete_package(session, package)
+        soft_delete_package(session, package,
+                            motivo=f"entregado hace mas de {PURGE_DELIVERED_AFTER_DAYS}d",
+                            log=log)
         unpublish_package(package.id, log=log)
 
     if viejos:

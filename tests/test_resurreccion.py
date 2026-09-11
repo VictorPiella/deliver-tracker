@@ -17,7 +17,11 @@ from app.web import create_app
 
 
 def app_de_pruebas(db_path):
-    return create_app(db_path=db_path, use_mock_gmail=True, enable_worker=False)
+    app = create_app(db_path=db_path, use_mock_gmail=True, enable_worker=False)
+    # TESTING desactiva la comprobacion de CSRF; sin esto todos los POST de los
+    # tests darian 400. La proteccion se prueba aparte, en test_csrf.py.
+    app.config["TESTING"] = True
+    return app
 
 
 class TestBorrarNoResucita:

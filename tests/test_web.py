@@ -122,6 +122,7 @@ class TestAppFactory:
     def test_cada_app_usa_su_propia_base(self, tmp_path):
         a = create_app(db_path=str(tmp_path / "a.db"), use_mock_gmail=True, enable_worker=False)
         b = create_app(db_path=str(tmp_path / "b.db"), use_mock_gmail=True, enable_worker=False)
+        a.config["TESTING"] = b.config["TESTING"] = True
 
         sincronizar(a.test_client())
 

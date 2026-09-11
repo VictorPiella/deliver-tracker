@@ -37,7 +37,7 @@ from .models import (
     get_last_sync, get_session, set_last_sync, Package, UnparsedEmail,
 )
 from .timeutils import utcnow, to_utc_naive
-from .sync import evento_anclable, ingest_event, ingest_carrier_event
+from .sync import evento_anclable, evento_ya_visto, ingest_event, ingest_carrier_event
 from .parsers import amazon, aliexpress, gls, correos
 
 # --- Configuración ---
@@ -219,10 +219,27 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
                 record_unparsed(session, message_id, sender, subject, event_date)
                 unparsed += 1
                 continue
+
+            if evento_ya_visto(session, message_id):
+                duplicated += 1
+                continue
+
+            # Primero se intenta enganchar a un paquete que ya sigamos: es lo
+            # ideal, porque GLS sólo reparte, no vende.
             created = ingest_carrier_event(session, parsed, courier="gls")
             if created:
                 ingested += 1
                 log(f"[gmail_sync] + gls {parsed['status']:<16} {subject[:50]}")
+                continue
+
+            # Y si no hay a qué engancharlo, entrada propia en vez de tirarlo.
+            # Pasaba con envíos cuya referencia de tienda no es de AliExpress, y
+            # con los de paquetes cuyos emails de tienda quedan fuera de la
+            # ventana de búsqueda: desaparecían sin dejar rastro.
+            created = ingest_event(session, gls.como_entrada_propia(parsed))
+            if created:
+                ingested += 1
+                log(f"[gmail_sync] + gls {parsed['status']:<16} (entrada propia) {subject[:40]}")
             else:
                 duplicated += 1
             continue

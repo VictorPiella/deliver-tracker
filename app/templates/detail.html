@@ -13,6 +13,7 @@
 
   <div class="detail-actions">
     <form method="POST" action="{{ url_for('set_status_route', package_id=package.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="select-wrap">
         <select name="status" onchange="this.form.submit()" aria-label="Cambiar estado">
           {% for valor, etiqueta in estados %}
@@ -28,6 +29,7 @@
 
     <form method="POST" action="{{ url_for('delete_package_route', package_id=package.id) }}"
           onsubmit="return confirm('¿Mover este paquete a la papelera?\n\nPodrás recuperarlo desde la papelera.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="btn btn-danger">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -117,6 +119,7 @@
         onsubmit="return confirm('¿Fusionar este paquete con el seleccionado?
 
 Sus eventos se moverán al otro y esta entrada desaparecerá.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="select-wrap">
       <select name="target_id" aria-label="Paquete de destino">
         {% for c in candidatos %}
