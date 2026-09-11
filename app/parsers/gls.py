@@ -24,12 +24,18 @@ STATUS_PATTERNS = [
 ]
 
 # "Tu pedido 315193141453520012 de Ecommerce con Nº de seguimiento GLS 1316197997"
+#
+# El nombre del remitente NO es siempre "Ecommerce": tenerlo escrito a fuego
+# hacía que emails perfectamente normales no se entendieran, p.ej.
+#   "Tu pedido 1349764642 de VGL INTERNATIONAL TRADE MARKET SL con Nº de
+#    seguimiento GLS 1349764642 está en camino."
+# Ahora se acepta cualquier nombre de tienda entre "de" y "con Nº de seguimiento".
 PACKAGE_AND_TRACKING_RE = re.compile(
-    r"pedido\s+(\d+)\s+de\s+Ecommerce\s+con\s+N[ºo°]?\.?\s*de\s+seguimiento\s+GLS\s+(\w+)",
+    r"pedido\s+(\w+)\s+de\s+.{1,80}?\s+con\s+N[ºo°]?\.?\s*de\s+seguimiento\s+GLS\s+(\w+)",
     re.IGNORECASE
 )
 # "...entregamos tu envio 1221358275 de Ecommerce..." (solo tracking, sin package_id)
-TRACKING_ONLY_RE = re.compile(r"env[ií]o\s+(\w+)\s+de\s+Ecommerce", re.IGNORECASE)
+TRACKING_ONLY_RE = re.compile(r"env[ií]o\s+(\w+)\s+de\s+\w", re.IGNORECASE)
 
 
 def matches(sender: str) -> bool:

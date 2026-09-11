@@ -44,16 +44,50 @@ class TestMatching:
 
 
 class TestEstados:
-    def test_remitente_determina_el_estado(self):
+    def test_el_remitente_determina_el_estado(self):
         casos = [
             ("auto-confirm@amazon.es", "ordered"),
             ("confirmar-envio@amazon.es", "shipped"),
             ("shipment-tracking@amazon.es", "out_for_delivery"),
-            ("order-update@amazon.es", "delivered"),
         ]
         for sender, esperado in casos:
             resultado = amazon.parse(sender, "Asunto cualquiera", "", "m1", EVENT_DATE)
             assert resultado["status"] == esperado, sender
+
+
+class TestOrderUpdate:
+    """
+    order-update@amazon.es es un cajón de sastre: manda entregas, cancelaciones,
+    intentos fallidos y cambios de fecha. Darlo por "entregado" sin mirar el
+    asunto marcaba como entregados pedidos cancelados y entregas fallidas — y
+    como 'delivered' es terminal, se quedaban así para siempre.
+    """
+
+    def _estado(self, subject):
+        return amazon.parse("order-update@amazon.es", subject, "", "m1", EVENT_DATE)["status"]
+
+    def test_una_entrega_de_verdad(self):
+        assert self._estado("Entregado: 1 producto | N.º de pedido 408-3320942-2576360") == "delivered"
+
+    def test_cancelacion_en_plural(self):
+        assert self._estado(
+            'Productos cancelados correctamente: 2 “TP-Link RE330...” y 3 productos') == "cancelled"
+
+    def test_cancelacion_en_singular(self):
+        assert self._estado(
+            'El producto se ha cancelado correctamente: “Motorola Sound MA1...”') == "cancelled"
+
+    def test_intento_de_entrega_no_es_una_entrega(self):
+        assert self._estado(
+            'Intento de entrega realizado: "Citrato de Magnesio..." y 4 productos más'
+        ) == "delivery_attempted"
+
+    def test_actualizacion_de_fecha_no_cambia_el_estado(self):
+        # Sólo reajusta la ETA; 'unknown' tiene rango -1 y no pisa nada.
+        assert self._estado('Actualización de entrega: “2 piezas de decoración...”') == "unknown"
+
+    def test_un_asunto_desconocido_no_inventa_una_entrega(self):
+        assert self._estado("Algo que Amazon no había mandado hasta hoy") == "unknown"
 
 
 class TestOrderId:

@@ -21,7 +21,7 @@ from flask import (
 
 from .models import (
     get_last_sync, get_session, Package, UnparsedEmail,
-    STATUS_LABELS_ES, STATUS_ORDER,
+    STATUS_CANCELLED, STATUS_FINALES, STATUS_LABELS_ES, STATUS_ORDER,
 )
 from .timeutils import utcnow, a_zona_local, formatear
 from .gmail_sync import run_sync
@@ -221,17 +221,19 @@ def register_routes(app: Flask) -> None:
             "eta": p.eta,
         } for p in packages]
 
+        # "Finalizado" incluye los cancelados: un pedido cancelado no está en
+        # tránsito, pero tampoco se ha entregado.
         resumen = {
             "total": len(data),
-            "en_transito": sum(1 for p in data if p["status"] != "delivered"),
-            "entregados": sum(1 for p in data if p["status"] == "delivered"),
+            "en_transito": sum(1 for p in data if p["status"] not in STATUS_FINALES),
+            "finalizados": sum(1 for p in data if p["status"] in STATUS_FINALES),
         }
         ultimo = get_last_sync(g.db)
         return render_template(
             "index.html",
             packages=data,
             resumen=resumen,
-            estados=[(s, STATUS_LABELS_ES[s]) for s in STATUS_ORDER],
+            estados=[(s, STATUS_LABELS_ES[s]) for s in STATUS_ORDER + [STATUS_CANCELLED]],
             auto_status=AUTO_STATUS,
             ultimo_escaneo=ultimo,
             ultimo_escaneo_rel=humanizar_antiguedad(ultimo),
@@ -283,7 +285,7 @@ def register_routes(app: Flask) -> None:
             package=pkg_data,
             timeline=timeline,
             candidatos=candidatos,
-            estados=[(s, STATUS_LABELS_ES[s]) for s in STATUS_ORDER],
+            estados=[(s, STATUS_LABELS_ES[s]) for s in STATUS_ORDER + [STATUS_CANCELLED]],
             auto_status=AUTO_STATUS,
         )
 
@@ -427,7 +429,7 @@ def register_routes(app: Flask) -> None:
             recompute_status_from_events(p)
             g.db.commit()
             flash(f"Estado devuelto al automático: {STATUS_LABELS_ES.get(p.status, p.status)}.", "success")
-        elif nuevo in STATUS_ORDER:
+        elif nuevo in STATUS_ORDER or nuevo == STATUS_CANCELLED:
             p.status = nuevo
             p.status_is_manual = True
             p.status_label_raw = "Marcado a mano desde el panel"

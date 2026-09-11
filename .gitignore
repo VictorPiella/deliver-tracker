@@ -45,7 +45,12 @@ Thumbs.db
 *.db-wal
 *.db-shm
 *.db-journal
-data/backups/
+
+# El volumen de datos entero: base, copias, credenciales de Gmail y sus
+# variantes archivadas. Nada de aqui debe acabar en el repo. Se ignora el
+# directorio completo porque los ficheros apartados llevan sufijo de fecha
+# (packages.db.v2-145946) y no casaban con *.db.
+data/
 
 # Credentials / tokens
 credentials.json

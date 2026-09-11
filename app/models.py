@@ -57,7 +57,7 @@ class Package(Base):
     # volvia a crearlo. Marcandolo aqui, los eventos se conservan (el email ya
     # no se reingiere) y ademas el borrado es reversible desde la papelera.
     deleted_at = Column(DateTime, index=True)
-    eta = Column(String)                                # fecha estimada de entrega (texto libre del email)                                # fecha estimada de entrega si viene en el email (texto libre por ahora)
+    eta = Column(String)                                # fecha estimada de entrega (texto libre del email)
     last_updated = Column(DateTime, default=utcnow, onupdate=utcnow)
     created_at = Column(DateTime, default=utcnow)
 
@@ -155,8 +155,15 @@ STATUS_ORDER = [
     "in_country",         # en tu país/región
     "at_distribution",    # en centro de distribución
     "out_for_delivery",   # en reparto
+    "delivery_attempted", # intento de entrega fallido (nadie en casa, etc.)
     "delivered",          # entregado
 ]
+
+# 'cancelled' NO va en STATUS_ORDER: no es un punto más avanzado del recorrido,
+# es un final distinto. Se trata aparte en sync.apply_status, donde manda sobre
+# cualquier otro estado — si el pedido se ha cancelado, da igual lo que dijeran
+# los emails anteriores.
+STATUS_CANCELLED = "cancelled"
 
 STATUS_LABELS_ES = {
     "ordered": "Pedido realizado",
@@ -168,9 +175,14 @@ STATUS_LABELS_ES = {
     "in_country": "En tu país",
     "at_distribution": "En centro de distribución",
     "out_for_delivery": "En reparto",
+    "delivery_attempted": "Entrega fallida",
     "delivered": "Entregado",
+    "cancelled": "Cancelado",
     "unknown": "Desconocido",
 }
+
+# Estados en los que el paquete ya no va a moverse más.
+STATUS_FINALES = {"delivered", STATUS_CANCELLED}
 
 
 # Un engine (y su pool de conexiones) por ruta de base de datos. Antes se creaba

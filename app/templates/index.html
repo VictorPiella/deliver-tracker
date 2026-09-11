@@ -13,8 +13,8 @@
     <span class="stat-label">En tránsito</span>
   </button>
   <button type="button" class="stat" data-filter="entregados">
-    <span class="stat-value">{{ resumen.entregados }}</span>
-    <span class="stat-label">Entregados</span>
+    <span class="stat-value">{{ resumen.finalizados }}</span>
+    <span class="stat-label">Finalizados</span>
   </button>
 </section>
 
@@ -46,7 +46,7 @@
 <div class="list" id="lista">
 {% for p in packages %}
 <article class="pkg"
-         data-delivered="{{ 'si' if p.status == 'delivered' else 'no' }}"
+         data-delivered="{{ 'si' if p.status in ('delivered', 'cancelled') else 'no' }}"
          data-search="{{ ((p.title or '') ~ ' ' ~ (p.external_package_id or '') ~ ' ' ~ (p.courier_tracking_number or '') ~ ' ' ~ p.source)|lower }}">
 
   <div class="pkg-main">
@@ -81,7 +81,7 @@
     <div class="progress" aria-hidden="true">
       <div class="progress-bar bar-{{ p.status }}" style="width: {{ p.progress_pct }}%;"></div>
     </div>
-    {% if p.eta and p.status != 'delivered' %}
+    {% if p.eta and p.status not in ('delivered', 'cancelled') %}
     <span class="eta" title="Fecha estimada de entrega, según el email">Llega {{ p.eta }}</span>
     {% endif %}
   </div>

@@ -6,7 +6,7 @@ emails desordenados o duplicados no rebobinen el estado).
 """
 from datetime import datetime
 from sqlalchemy.exc import IntegrityError
-from .models import Order, Package, PackageEvent, STATUS_ORDER
+from .models import Order, Package, PackageEvent, STATUS_CANCELLED, STATUS_ORDER
 
 
 def status_rank(status: str) -> int:
@@ -42,6 +42,19 @@ def apply_status(package, nuevo_status: str) -> bool:
     """
     if package.status_is_manual:
         return False
+
+    # Una cancelación manda sobre todo lo demás: no es un punto del recorrido,
+    # es otro final. Da igual que el paquete figurara como enviado o en reparto.
+    if nuevo_status == STATUS_CANCELLED:
+        if package.status == STATUS_CANCELLED:
+            return False
+        package.status = STATUS_CANCELLED
+        return True
+
+    # Y al revés: nada reanima un pedido ya cancelado.
+    if package.status == STATUS_CANCELLED:
+        return False
+
     if package.status == "unknown" or status_rank(nuevo_status) >= status_rank(package.status):
         package.status = nuevo_status
         return True
@@ -232,11 +245,24 @@ def ingest_event(session, event: dict) -> bool:
         existing_packages = (
             session.query(Package)
             .filter_by(order_id=order.id, source=source)
+            .order_by(Package.id)
             .all()
         )
         if len(existing_packages) == 1:
             package = existing_packages[0]
+        elif existing_packages and event["status"] == "ordered":
+            # El email de "Pedido realizado" es del PEDIDO, no de un envío
+            # concreto, y en un escaneo llega el último (Gmail devuelve primero
+            # lo más nuevo). Si el pedido ya tiene varios envíos, el fallback de
+            # abajo creaba un tercer paquete fantasma 'order-XXX' clavado en
+            # "Pedido realizado" para siempre. Colgarlo de uno de los envíos
+            # reales no puede estropear nada: 'ordered' es el estado de menor
+            # rango, así que apply_status no lo aplicará sobre ninguno.
+            package = existing_packages[0]
         else:
+            # Varios envíos y un evento que SÍ cambiaría el estado (una entrega,
+            # una cancelación): no hay forma de saber a cuál se refiere, así que
+            # mejor un paquete de más que marcar el envío equivocado.
             package = get_or_create_package(session, order, source, package_id_ext)
     else:
         package = get_or_create_package(session, order, source, package_id_ext)

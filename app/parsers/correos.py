@@ -20,7 +20,10 @@ SENDER_DOMAIN = "correos.com"
 STATUS_PATTERNS = [
     (re.compile(r"tiene prevista su entrega hoy", re.IGNORECASE), "out_for_delivery"),
     (re.compile(r"ser[aá] entregado en los pr[oó]ximos d[ií]as", re.IGNORECASE), "local_carrier"),
-    (re.compile(r"ha sido entregad[oa]|entregamos tu env[ií]o", re.IGNORECASE), "delivered"),
+    # "hemos entregado tu envío PKCLEH... el 31/08/2026" es la forma que usa
+    # Correos en el aviso de entrega, y no casaba con ninguna de las otras dos.
+    (re.compile(r"ha sido entregad[oa]|hemos entregado|entregamos tu env[ií]o",
+                re.IGNORECASE), "delivered"),
 ]
 
 TRACKING_RE = re.compile(r"env[ií]o\s+([A-Z0-9]{6,})", re.IGNORECASE)
@@ -38,8 +41,17 @@ def detect_status(text: str) -> str:
     return "unknown"
 
 
+# Quitar sólo las etiquetas deja dentro el CONTENIDO de <style> y <script>, que
+# en los emails de Correos son kilobytes de CSS (@font-face, urls, reglas...).
+# Ese ruido tapaba el texto de verdad y hacía que el parser no encontrara ni el
+# estado ni el número de envío; de paso, "remitido por" llegaba a casar con
+# basura del CSS y acababa de título del paquete.
+BLOQUES_NO_TEXTO_RE = re.compile(r"<(style|script)[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
+
+
 def _strip_html(html_body: str) -> str:
-    text = re.sub(r"<[^>]+>", " ", html_body)
+    text = BLOQUES_NO_TEXTO_RE.sub(" ", html_body)
+    text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return html.unescape(text)
 

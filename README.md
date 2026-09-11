@@ -307,7 +307,17 @@ GMAIL_FIRST_SCAN_DAYS=90 docker compose up -d --build
 
 Los estados de los emails se normalizan a un conjunto común, en orden de progreso:
 
-`ordered` → `shipped` → `customs` → `customs_cleared` → `left_origin` → `local_carrier` → `in_country` → `at_distribution` → `out_for_delivery` → `delivered`
+`ordered` → `shipped` → `customs` → `customs_cleared` → `left_origin` → `local_carrier` → `in_country` → `at_distribution` → `out_for_delivery` → `delivery_attempted` → `delivered`
+
+Fuera de esa progresión hay un estado más, **`cancelled`**, que no es un punto más
+avanzado del recorrido sino otro final. Manda sobre cualquier otro (si el pedido se
+canceló, da igual que antes figurara como enviado) y nada lo reanima después.
+
+> **Ojo con `order-update@amazon.es`.** Ese remitente es un cajón de sastre: manda
+> entregas, cancelaciones, intentos de entrega fallidos y cambios de fecha. Darlo por
+> "entregado" sin mirar el asunto marcaba como entregados pedidos cancelados y entregas
+> que habían fallado — y como `delivered` es terminal, se quedaban así para siempre. El
+> estado sale del asunto; ver `ORDER_UPDATE_PATTERNS` en `app/parsers/amazon.py`.
 
 El estado de un paquete **sólo avanza**: un email que llega desordenado o repetido no rebobina uno ya entregado.
 

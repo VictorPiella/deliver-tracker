@@ -676,7 +676,11 @@ main {
 .badge-in_country,
 .badge-at_distribution  { background: var(--s-cyan-bg);   color: var(--s-cyan); }
 .badge-out_for_delivery { background: var(--s-amber-bg);  color: var(--s-amber); }
+.badge-delivery_attempted { background: var(--s-red-bg);   color: var(--s-red); }
 .badge-delivered        { background: var(--s-green-bg);  color: var(--s-green); }
+/* Cancelado no es un punto del recorrido: se ve apagado, no verde de "listo". */
+.badge-cancelled        { background: var(--s-gray-bg);   color: var(--s-gray);
+                          text-decoration: line-through; }
 .badge-unknown          { background: var(--s-gray-bg);   color: var(--s-gray); }
 
 /* Marca de "estado puesto a mano": los emails ya no lo cambian. */
@@ -712,7 +716,9 @@ main {
 .bar-in_country,
 .bar-at_distribution  { background: var(--s-cyan); }
 .bar-out_for_delivery { background: var(--s-amber); }
+.bar-delivery_attempted { background: var(--s-red); }
 .bar-delivered        { background: var(--s-green); }
+.bar-cancelled        { background: var(--s-gray); }
 
 /* ------------------------------------------------------------------ fecha */
 
