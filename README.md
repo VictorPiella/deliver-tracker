@@ -26,7 +26,7 @@ Todo corre en **un único container**: servidor web, worker y base de datos. No 
 | Email | Gmail API (mock en dev, OAuth real en prod) |
 | Servidor | gunicorn (1 worker + 8 threads) |
 | Despliegue | Docker / Docker Compose |
-| UI | Jinja2 + CSS vanilla |
+| UI | Jinja2 + CSS vanilla (tema claro/oscuro, responsive) |
 
 ---
 
@@ -39,7 +39,7 @@ copy .env.example .env
 docker compose up --build
 ```
 
-Abre `http://localhost:5000` y pulsa **"Escanear ahora"**.
+Abre `http://localhost:5000` y pulsa **"Escanear"**.
 
 Por defecto arranca con `USE_MOCK_GMAIL=true`, es decir contra los emails de ejemplo de `app/mock_gmail.py` — **no toca tu Gmail**. Para conectar tu cuenta real, ver [Conectar Gmail real](#conectar-gmail-real-oauth).
 
@@ -172,11 +172,13 @@ scp data\credentials.json data\token.json root@192.168.1.10:/mnt/user/appdata/de
 
 Cada fila del panel lleva:
 
-- **Desplegable de estado** — marca un paquete a mano (p.ej. como *Entregado* porque ya lo tienes). Un estado manual **manda sobre los emails**: los que lleguen después se siguen guardando en el histórico, pero no cambian el estado. Se marca con una `M` junto al estado.
+- **Desplegable de estado** — marca un paquete a mano (p.ej. como *Entregado* porque ya lo tienes). Un estado manual **manda sobre los emails**: los que lleguen después se siguen guardando en el histórico, pero no cambian el estado. Se marca con la etiqueta `manual` junto al estado.
 - **Volver a automático** (`↺`, sólo aparece si el estado es manual) — suelta el control y recalcula el estado desde los eventos recibidos.
-- **Botón `✕`** — borra el paquete y su histórico, y retira su entidad de Home Assistant.
+- **Botón de papelera** — borra el paquete y su histórico, y retira su entidad de Home Assistant.
 
-Arriba hay filtros (*Todos / En tránsito / Entregados*) y un buscador que filtra por nombre de producto, ID de paquete y número de seguimiento. Ambos funcionan en el cliente: la lista de un panel doméstico cabe entera en la página.
+Arriba, las tres tarjetas de recuento (*Total / En tránsito / Entregados*) hacen de filtro, y el buscador filtra por nombre de producto, ID de paquete y número de seguimiento. Ambos funcionan en el cliente: la lista de un panel doméstico cabe entera en la página.
+
+El panel sigue el **tema del sistema** (claro/oscuro) y el botón de la cabecera permite forzar uno; la elección se guarda en `localStorage`. El diseño es responsive: por debajo de 760px cada paquete pasa a ser una ficha apilada con controles a tamaño de dedo.
 
 ## Estados normalizados
 

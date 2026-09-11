@@ -2,32 +2,46 @@
 {% block title %}{{ package.title or package.external_package_id }}{% endblock %}
 {% block content %}
 
-<div class="detail-toolbar">
-  <a class="back-link" href="{{ url_for('index') }}">&larr; Volver al manifiesto</a>
+<div class="detail-top">
+  <a class="back-link" href="{{ url_for('index') }}">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="m15 18-6-6 6-6"/>
+    </svg>
+    Volver
+  </a>
 
   <div class="detail-actions">
     <form method="POST" action="{{ url_for('set_status_route', package_id=package.id) }}">
-      <select name="status" onchange="this.form.submit()" aria-label="Cambiar estado">
-        {% for valor, etiqueta in estados %}
-        <option value="{{ valor }}" {{ 'selected' if valor == package.status }}>{{ etiqueta }}</option>
-        {% endfor %}
-        {% if package.status_is_manual %}
-        <option value="{{ auto_status }}">↺ Volver a automático</option>
-        {% endif %}
-      </select>
-      <noscript><button type="submit" class="btn-mini">Aplicar</button></noscript>
+      <div class="select-wrap">
+        <select name="status" onchange="this.form.submit()" aria-label="Cambiar estado">
+          {% for valor, etiqueta in estados %}
+          <option value="{{ valor }}" {{ 'selected' if valor == package.status }}>{{ etiqueta }}</option>
+          {% endfor %}
+          {% if package.status_is_manual %}
+          <option value="{{ auto_status }}">↺ Volver a automático</option>
+          {% endif %}
+        </select>
+      </div>
+      <noscript><button type="submit" class="btn btn-ghost btn-sm">Aplicar</button></noscript>
     </form>
 
     <form method="POST" action="{{ url_for('delete_package_route', package_id=package.id) }}"
           onsubmit="return confirm('¿Eliminar este paquete?\n\nSe borra también su histórico de eventos. No se puede deshacer.');">
-      <button type="submit" class="btn-delete">Eliminar paquete</button>
+      <button type="submit" class="btn btn-danger">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+          <path d="M10 11v6M14 11v6"/>
+        </svg>
+        Eliminar
+      </button>
     </form>
   </div>
 </div>
 
-<div class="detail-header">
-  <span class="badge">{{ package.status_label }}</span>
-  <div class="detail-header-top">
+<div class="card detail-card">
+  <div class="detail-head">
     {% if package.image_url %}
     <img class="detail-thumb" src="{{ package.image_url }}" alt=""
          onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
@@ -35,59 +49,72 @@
     {% else %}
     <div class="detail-thumb detail-thumb-fallback {{ package.source }}">{{ package.source[:2]|upper }}</div>
     {% endif %}
-    <div style="flex:1; min-width:0">
-      <h2>{{ package.title or '(sin nombre de producto)' }}</h2>
-      <div class="progress-track">
-        <div class="progress-fill {{ package.status }}" style="width: {{ package.progress_pct }}%;"></div>
+
+    <div class="detail-headings">
+      <h1>{{ package.title or '(sin nombre de producto)' }}</h1>
+      <div class="detail-badges">
+        <span class="badge badge-{{ package.status }}">
+          {{ package.status_label }}
+          {% if package.status_is_manual %}<span class="manual-mark">manual</span>{% endif %}
+        </span>
+        <span class="chip chip-{{ package.source }}">{{ package.source }}</span>
+      </div>
+      <div class="progress" aria-hidden="true">
+        <div class="progress-bar bar-{{ package.status }}" style="width: {{ package.progress_pct }}%;"></div>
       </div>
     </div>
   </div>
 
   <div class="detail-grid">
-    <div class="detail-field">
-      <label>Origen</label>
-      <span class="source-tag {{ package.source }}">{{ package.source }}</span>
-    </div>
-    <div class="detail-field">
+    <div class="field">
       <label>ID de paquete</label>
-      <span>{{ package.external_package_id }}</span>
+      <div class="field-value mono">{{ package.external_package_id }}</div>
     </div>
-    <div class="detail-field">
+    <div class="field">
       <label>ID de pedido</label>
-      <span>{{ package.order_external_id or '—' }}</span>
+      <div class="field-value mono">{{ package.order_external_id or '—' }}</div>
     </div>
-    <div class="detail-field">
+    <div class="field">
       <label>Transportista</label>
-      <span>{{ package.courier or 'No identificado' }}</span>
+      <div class="field-value">{{ package.courier or 'No identificado' }}</div>
     </div>
-    <div class="detail-field">
+    <div class="field">
       <label>Tracking transportista</label>
-      <span>{{ package.courier_tracking_number or '—' }}</span>
+      <div class="field-value mono">{{ package.courier_tracking_number or '—' }}</div>
     </div>
   </div>
 
   {% if package.status_is_manual %}
-  <div class="manual-notice">
-    <strong>Estado fijado a mano.</strong> Los emails que lleguen se seguirán guardando
-    en el histórico de abajo, pero no cambiarán este estado. Elige
-    «↺ Volver a automático» en el desplegable para devolvérselo a los emails.
+  <div class="notice">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+    </svg>
+    <div>
+      <strong>Estado fijado a mano.</strong> Los emails que lleguen se seguirán guardando
+      en el histórico, pero no cambiarán este estado. Elige
+      «↺ Volver a automático» en el desplegable para devolvérselo a los emails.
+    </div>
   </div>
   {% endif %}
 </div>
 
 {% if timeline %}
-<ul class="timeline">
-  {% for ev in timeline %}
-  <li {% if loop.last %}class="is-last"{% endif %}>
-    <div class="t-date">{{ ev.event_date.strftime('%d %b %Y, %H:%M') }}</div>
-    <div class="t-status">{{ ev.status_label }}</div>
-    <div class="t-raw">{{ ev.gmail_subject }}</div>
-  </li>
-  {% endfor %}
-</ul>
+<h2 class="section-title">Histórico · {{ timeline|length }} evento{{ '' if timeline|length == 1 else 's' }}</h2>
+<div class="card">
+  <ul class="timeline">
+    {% for ev in timeline %}
+    <li {% if loop.last %}class="is-last"{% endif %}>
+      <div class="t-date">{{ ev.event_date.strftime('%d %b %Y · %H:%M') }}</div>
+      <div class="t-status">{{ ev.status_label }}</div>
+      <div class="t-raw">{{ ev.gmail_subject }}</div>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
 {% else %}
-<div class="empty-state">
-  <div class="stamp">Sin eventos</div>
+<div class="empty">
+  <div class="empty-title">Sin eventos</div>
   <p>Este paquete no tiene ningún email asociado todavía.</p>
 </div>
 {% endif %}

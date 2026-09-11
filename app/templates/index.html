@@ -3,108 +3,132 @@
 {% block content %}
 
 {% if packages %}
-<div class="toolbar">
-  <div class="filters" role="group" aria-label="Filtrar paquetes">
-    <button type="button" class="filter is-active" data-filter="todos">
-      Todos <span class="count">{{ resumen.total }}</span>
-    </button>
-    <button type="button" class="filter" data-filter="transito">
-      En tránsito <span class="count">{{ resumen.en_transito }}</span>
-    </button>
-    <button type="button" class="filter" data-filter="entregados">
-      Entregados <span class="count">{{ resumen.entregados }}</span>
-    </button>
-  </div>
+<section class="stats" role="group" aria-label="Filtrar paquetes">
+  <button type="button" class="stat is-active" data-filter="todos">
+    <span class="stat-value">{{ resumen.total }}</span>
+    <span class="stat-label">Total</span>
+  </button>
+  <button type="button" class="stat" data-filter="transito">
+    <span class="stat-value">{{ resumen.en_transito }}</span>
+    <span class="stat-label">En tránsito</span>
+  </button>
+  <button type="button" class="stat" data-filter="entregados">
+    <span class="stat-value">{{ resumen.entregados }}</span>
+    <span class="stat-label">Entregados</span>
+  </button>
+</section>
+
+<div class="list-bar">
   <label class="search">
-    <input type="search" id="buscador" placeholder="Buscar producto o nº de envío…"
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
+    </svg>
+    <input type="search" id="buscador" placeholder="Buscar producto o nº de seguimiento…"
            autocomplete="off" spellcheck="false">
   </label>
 </div>
 
-<div class="manifest-header">
-  <div>Origen</div>
+<div class="list-head" aria-hidden="true">
   <div>Paquete</div>
   <div>Estado</div>
   <div>Actualizado</div>
   <div>Acciones</div>
 </div>
 
-<div id="lista">
+<div class="list" id="lista">
 {% for p in packages %}
-<div class="package-row"
-     data-delivered="{{ 'si' if p.status == 'delivered' else 'no' }}"
-     data-search="{{ ((p.title or '') ~ ' ' ~ (p.external_package_id or '') ~ ' ' ~ (p.courier_tracking_number or '') ~ ' ' ~ p.source)|lower }}">
+<article class="pkg"
+         data-delivered="{{ 'si' if p.status == 'delivered' else 'no' }}"
+         data-search="{{ ((p.title or '') ~ ' ' ~ (p.external_package_id or '') ~ ' ' ~ (p.courier_tracking_number or '') ~ ' ' ~ p.source)|lower }}">
 
-  <div class="cell-source">
-    <span class="source-tag {{ p.source }}">{{ p.source }}</span>
-  </div>
+  <div class="pkg-main">
+    <div class="thumb-wrap">
+      {% if p.image_url %}
+      <img class="thumb" src="{{ p.image_url }}" alt="" loading="lazy"
+           onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+      <div class="thumb thumb-fallback {{ p.source }}" style="display:none">{{ p.source[:2]|upper }}</div>
+      {% else %}
+      <div class="thumb thumb-fallback {{ p.source }}">{{ p.source[:2]|upper }}</div>
+      {% endif %}
+    </div>
 
-  <div class="pkg-info">
-    {% if p.image_url %}
-    <img class="pkg-thumb" src="{{ p.image_url }}" alt="" loading="lazy"
-         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-    <div class="pkg-thumb pkg-thumb-fallback {{ p.source }}" style="display:none">{{ p.source[:2]|upper }}</div>
-    {% else %}
-    <div class="pkg-thumb pkg-thumb-fallback {{ p.source }}">{{ p.source[:2]|upper }}</div>
-    {% endif %}
-    <div class="pkg-text">
+    <div class="pkg-body">
       <a class="pkg-title" href="{{ url_for('package_detail', package_id=p.id) }}">
         {{ p.title or '(sin nombre de producto)' }}
       </a>
-      <div class="pkg-id">
-        #{{ p.external_package_id }}
-        <span class="pkg-events">· {{ p.n_events }} evento{{ '' if p.n_events == 1 else 's' }}</span>
+      <div class="pkg-meta">
+        <span class="chip chip-{{ p.source }}">{{ p.source }}</span>
+        <span class="mono">#{{ p.external_package_id }}</span>
+        <span class="dot">·</span>
+        <span class="nowrap">{{ p.n_events }} evento{{ '' if p.n_events == 1 else 's' }}</span>
       </div>
     </div>
   </div>
 
-  <div class="status-cell">
-    <span class="status-label {{ p.status }}">
+  <div class="pkg-status">
+    <span class="badge badge-{{ p.status }}">
       {{ p.status_label }}
-      {% if p.status_is_manual %}<span class="manual-mark" title="Estado fijado a mano: los emails no lo cambiarán">M</span>{% endif %}
+      {% if p.status_is_manual %}<span class="manual-mark" title="Estado fijado a mano: los emails no lo cambiarán">manual</span>{% endif %}
     </span>
-    <div class="progress-track" aria-hidden="true">
-      <div class="progress-fill {{ p.status }}" style="width: {{ p.progress_pct }}%;"></div>
+    <div class="progress" aria-hidden="true">
+      <div class="progress-bar bar-{{ p.status }}" style="width: {{ p.progress_pct }}%;"></div>
     </div>
   </div>
 
-  <div class="updated-cell">
-    {{ p.last_updated.strftime('%d %b %Y') if p.last_updated else '—' }}
-    <span class="hora">{{ p.last_updated.strftime('%H:%M') if p.last_updated else '' }}</span>
+  <div class="pkg-date">
+    <span class="date-main">{{ p.last_updated.strftime('%d %b') if p.last_updated else '—' }}</span>
+    <span class="date-sub">{{ p.last_updated.strftime('%Y · %H:%M') if p.last_updated else '' }}</span>
   </div>
 
-  <div class="actions-cell">
+  <div class="pkg-actions">
     <form method="POST" action="{{ url_for('set_status_route', package_id=p.id) }}" class="status-form">
-      <select name="status" onchange="this.form.submit()" aria-label="Cambiar estado">
-        {% for valor, etiqueta in estados %}
-        <option value="{{ valor }}" {{ 'selected' if valor == p.status }}>{{ etiqueta }}</option>
-        {% endfor %}
-        {% if p.status_is_manual %}
-        <option value="{{ auto_status }}">↺ Volver a automático</option>
-        {% endif %}
-      </select>
-      <noscript><button type="submit" class="btn-mini">Aplicar</button></noscript>
+      <div class="select-wrap">
+        <select name="status" onchange="this.form.submit()" aria-label="Cambiar estado">
+          {% for valor, etiqueta in estados %}
+          <option value="{{ valor }}" {{ 'selected' if valor == p.status }}>{{ etiqueta }}</option>
+          {% endfor %}
+          {% if p.status_is_manual %}
+          <option value="{{ auto_status }}">↺ Volver a automático</option>
+          {% endif %}
+        </select>
+      </div>
+      <noscript><button type="submit" class="btn btn-ghost btn-sm">Aplicar</button></noscript>
     </form>
 
     <form method="POST" action="{{ url_for('delete_package_route', package_id=p.id) }}"
           onsubmit="return confirm('¿Eliminar «{{ (p.title or p.external_package_id)|replace("'", "") }}»?\n\nSe borra también su histórico de eventos. No se puede deshacer.');">
-      <button type="submit" class="btn-icon" title="Eliminar paquete" aria-label="Eliminar paquete">✕</button>
+      <button type="submit" class="icon-btn icon-btn-danger" title="Eliminar paquete" aria-label="Eliminar paquete">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+          <path d="M10 11v6M14 11v6"/>
+        </svg>
+      </button>
     </form>
   </div>
-</div>
+</article>
 {% endfor %}
 </div>
 
-<div class="empty-state" id="sin-resultados" hidden>
-  <div class="stamp">Nada coincide</div>
+<div class="empty" id="sin-resultados" hidden>
+  <div class="empty-title">Nada coincide</div>
   <p>Prueba con otro filtro o término de búsqueda.</p>
 </div>
 
 {% else %}
-<div class="empty-state">
-  <div class="stamp">Sin paquetes registrados</div>
+<div class="empty">
+  <div class="empty-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+      <line x1="12" y1="22.08" x2="12" y2="12"/>
+    </svg>
+  </div>
+  <div class="empty-title">Sin paquetes registrados</div>
   <p>Cuando lleguen emails de Amazon, AliExpress, GLS o Correos aparecerán aquí.</p>
-  <p class="hint">Pulsa <strong>Escanear ahora</strong> para buscarlos.</p>
+  <p class="empty-hint">Pulsa <strong>Escanear</strong> para buscarlos ahora.</p>
 </div>
 {% endif %}
 
@@ -115,8 +139,8 @@
     var lista = document.getElementById('lista');
     if (!lista) return;
 
-    var filas = Array.prototype.slice.call(lista.querySelectorAll('.package-row'));
-    var botones = Array.prototype.slice.call(document.querySelectorAll('.filter'));
+    var filas = Array.prototype.slice.call(lista.querySelectorAll('.pkg'));
+    var botones = Array.prototype.slice.call(document.querySelectorAll('.stat'));
     var buscador = document.getElementById('buscador');
     var vacio = document.getElementById('sin-resultados');
     var filtroActivo = 'todos';
