@@ -56,3 +56,9 @@ data/
 credentials.json
 token.json
 token.pickle
+
+# Artefactos de despliegue: el .tar de la imagen que genera deploy-unraid.ps1
+# pesa ~80MB y se regenera en cada despliegue. Estaba en .dockerignore pero no
+# aqui, y se colo en un commit.
+deploy/out/
+*.tar
