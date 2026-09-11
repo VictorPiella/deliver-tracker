@@ -378,3 +378,144 @@ class TestLastUpdatedNoSeMueveSola:
 
         self._paquete(session)
         assert reparar_last_updated(session, log=lambda *a: None) == 0
+
+
+class TestUnEmailConVariosPedidos:
+    """
+    Amazon parte una compra en varios pedidos cuando los artículos salen de
+    sitios distintos, y manda UN solo email de confirmación con un bloque por
+    pedido. extract_order_id devuelve sólo la primera coincidencia, así que el
+    segundo pedido desaparecía sin dejar rastro.
+    """
+
+    CUERPO = (
+        "¡Gracias por tu pedido!\n"
+        "Llega mañana\n"
+        "Victor - Taradell, Barcelona\n"
+        "Pedido n.º\n408-0917824-6197118\n"
+        "Ver o modificar pedido\n"
+        "https://www.amazon.es/your-orders/order-details?orderID=408-0917824-6197118\n"
+        "* Adaptador de Cargador inalámbrico Tipo C (2 Unidades)\n"
+        " Cantidad: 1\n 11.09 EUR\n"
+        "Total\n11.09 EUR\n"
+        "Llega el jueves\n"
+        "Victor - Taradell, Barcelona\n"
+        "Pedido n.º\n408-2438266-2656303\n"
+        "Ver o modificar pedido\n"
+        "https://www.amazon.es/your-orders/order-details?orderID=408-2438266-2656303\n"
+        "* JZ Type-C 5V/2000mA Adaptación del Receptor de Carga inalámbrica Qi\n"
+        " Cantidad: 1\n 22.99 EUR\n"
+        "Total\n26.62 EUR\n"
+    )
+    ASUNTO = 'Pedido: “JZ Type-C 5V/2000mA...” y 1 producto más'
+
+    def _parse(self, mid="msg-jz"):
+        return amazon.parse("auto-confirm@amazon.es", self.ASUNTO, self.CUERPO, mid, FECHA)
+
+    def test_devuelve_un_evento_por_pedido(self):
+        r = self._parse()
+        assert isinstance(r, list)
+        assert len(r) == 2
+
+    def test_cada_uno_con_su_numero_de_pedido(self):
+        assert [e["order_id"] for e in self._parse()] == [
+            "408-0917824-6197118", "408-2438266-2656303"]
+
+    def test_cada_uno_con_su_producto(self):
+        # El asunto sólo nombra uno de los dos: si el título saliera de ahí,
+        # los dos pedidos se llamarían igual.
+        titulos = [e["title"] for e in self._parse()]
+        assert "Adaptador de Cargador" in titulos[0]
+        assert "JZ Type-C" in titulos[1]
+        assert titulos[0] != titulos[1]
+
+    def test_cada_uno_con_su_fecha(self):
+        assert [e["eta"] for e in self._parse()] == ["mañana", "el jueves"]
+
+    def test_message_id_unico_por_pedido(self):
+        # Con el mismo id, la deduplicación descartaría el segundo pedido.
+        ids = [e["message_id"] for e in self._parse("abc")]
+        assert ids == ["abc-ord0", "abc-ord1"]
+        assert len(set(ids)) == 2
+
+    def test_los_dos_acaban_en_la_base(self, session):
+        for evento in self._parse():
+            ingest_event(session, evento)
+        assert session.query(Order).count() == 2
+        assert session.query(Package).count() == 2
+
+    def test_un_email_de_un_solo_pedido_sigue_devolviendo_un_dict(self):
+        cuerpo = ("Llega el martes, 24 de junio\nPedido n.º\n408-3320942-2576360\n"
+                  "* Grupo de Seguridad, Válvula\n")
+        r = amazon.parse("auto-confirm@amazon.es", 'Pedido: "Grupo de Seguridad"',
+                         cuerpo, "m1", FECHA)
+        assert isinstance(r, dict)
+        assert r["order_id"] == "408-3320942-2576360"
+        assert r["title"] == "Grupo de Seguridad, Válvula"
+
+
+class TestLlegaSinDa:
+    def test_llega_cuenta_igual_que_llegada(self):
+        # El email de confirmación escribe "Llega mañana"; los de envío,
+        # "Llegada entre el...". Con sólo "Llegada" se perdían los primeros.
+        assert amazon.extract_eta("Llega mañana\nPedido n.º") == "mañana"
+        assert amazon.extract_eta("Llega el jueves\nVictor") == "el jueves"
+
+    def test_el_formato_de_siempre_sigue_valiendo(self):
+        assert amazon.extract_eta(
+            "Llegada entre el 6 de julio y el 7 de julio\n") == "entre el 6 de julio y el 7 de julio"
+        assert amazon.extract_eta("Llegada hoy\n") == "hoy"
+
+
+class TestElTituloDelBloqueManda:
+    """
+    El título del asunto es una aproximación: en un email con varios pedidos
+    nombra sólo a uno, así que a los demás les pondría el producto equivocado.
+    El del bloque de cada pedido es el bueno y tiene que poder pisar al otro.
+    """
+
+    def test_el_bloque_marca_su_titulo_como_preciso(self):
+        cuerpo = "Llega mañana\nPedido n.º\n408-0917824-6197118\n* Producto de verdad\n"
+        r = amazon.parse("auto-confirm@amazon.es", 'Pedido: "Nombre del asunto"',
+                         cuerpo, "m1", FECHA)
+        assert r["title"] == "Producto de verdad"
+        assert r["title_preciso"] is True
+
+    def test_sin_bloque_el_titulo_no_es_preciso(self):
+        r = amazon.parse("auto-confirm@amazon.es", 'Pedido: "Nombre del asunto"',
+                         "", "m1", FECHA)
+        assert r["title_preciso"] is False
+
+    def test_un_titulo_preciso_corrige_al_anterior(self, session):
+        # Primero entra el nombre sacado del asunto...
+        ingest_event(session, {
+            "source": "amazon", "order_id": "408-0917824-6197118", "package_id": None,
+            "status": "ordered", "status_label_raw": "Pedido",
+            "title": "Nombre del asunto", "image_url": None,
+            "message_id": "m1", "event_date": EVENT_DATE,
+        })
+        assert session.query(Order).one().title == "Nombre del asunto"
+
+        # ...y despues el del bloque, que es el bueno.
+        ingest_event(session, {
+            "source": "amazon", "order_id": "408-0917824-6197118", "package_id": None,
+            "status": "ordered", "status_label_raw": "Pedido",
+            "title": "Producto de verdad", "title_preciso": True, "image_url": None,
+            "message_id": "m2", "event_date": EVENT_DATE,
+        })
+        assert session.query(Order).one().title == "Producto de verdad"
+
+    def test_uno_impreciso_no_pisa_al_que_ya_habia(self, session):
+        ingest_event(session, {
+            "source": "amazon", "order_id": "408-0917824-6197118", "package_id": None,
+            "status": "ordered", "status_label_raw": "Pedido",
+            "title": "Producto de verdad", "title_preciso": True, "image_url": None,
+            "message_id": "m1", "event_date": EVENT_DATE,
+        })
+        ingest_event(session, {
+            "source": "amazon", "order_id": "408-0917824-6197118", "package_id": None,
+            "status": "shipped", "status_label_raw": "Enviado",
+            "title": "(sin título)", "image_url": None,
+            "message_id": "m2", "event_date": EVENT_DATE,
+        })
+        assert session.query(Order).one().title == "Producto de verdad"

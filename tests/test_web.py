@@ -160,3 +160,31 @@ class TestNombreDeLaApp:
         # El identificador NO sigue al nombre: cambiarlo crearía un device nuevo
         # en HA y dejaría huérfanas las entidades existentes.
         assert DEVICE["identifiers"] == ["deliver_tracker"]
+
+
+class TestCambioDeTema:
+    """
+    El boton de tema perdio su listener al reescribir los scripts de base.html:
+    seguia ahi, pintado, pero sin hacer nada. Estos tests lo sujetan.
+    """
+
+    def test_el_boton_existe(self, client):
+        assert 'id="tema-toggle"' in client.get("/").get_data(as_text=True)
+
+    def test_y_tiene_quien_lo_escuche(self, client):
+        html = client.get("/").get_data(as_text=True)
+        # No basta con que exista el boton: alguien tiene que engancharse a el.
+        assert "getElementById('tema-toggle')" in html
+        assert "addEventListener('click'" in html
+
+    def test_guarda_la_eleccion(self, client):
+        html = client.get("/").get_data(as_text=True)
+        assert "localStorage.setItem('tema'" in html
+        assert "setAttribute('data-theme'" in html
+
+    def test_se_aplica_antes_de_pintar(self, client):
+        # El tema guardado se pone en <head>, antes del <body>: si se hiciera
+        # despues, al recargar en oscuro se veria un fogonazo blanco.
+        html = client.get("/").get_data(as_text=True)
+        cabeza = html[:html.index("<body")]
+        assert "localStorage.getItem('tema')" in cabeza

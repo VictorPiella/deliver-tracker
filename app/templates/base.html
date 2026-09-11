@@ -92,6 +92,29 @@
   </main>
 
   <script>
+    // Cambiar entre claro y oscuro. Este bloque se perdio al reescribir los
+    // scripts para animar el boton de escaneo: el boton se quedo en el HTML
+    // pero sin nada que lo escuchara, asi que no hacia absolutamente nada.
+    (function () {
+      var boton = document.getElementById('tema-toggle');
+      if (!boton) return;
+
+      function actual() {
+        var guardado = null;
+        try { guardado = localStorage.getItem('tema'); } catch (e) {}
+        if (guardado) return guardado;
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+
+      boton.addEventListener('click', function () {
+        var nuevo = actual() === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', nuevo);
+        try { localStorage.setItem('tema', nuevo); } catch (e) {}
+      });
+    })();
+  </script>
+
+  <script>
     // El escaneo corre en segundo plano. Se sondea para animar el botón
     // mientras dura y recargar al terminar — incluido cuando lo ha lanzado el
     // worker horario y no tú.

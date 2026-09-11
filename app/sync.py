@@ -323,7 +323,11 @@ def ingest_event(session, event: dict) -> bool:
     if event.get("eta"):
         package.eta = event["eta"]
 
-    if event.get("title") and not order.title:
+    # Un titulo "preciso" (sacado del bloque del propio pedido) pisa al que
+    # hubiera; el del asunto solo rellena si no habia nada. Sin esto, un pedido
+    # creado antes desde un email con varios pedidos se quedaba con el nombre
+    # del producto equivocado para siempre.
+    if event.get("title") and (not order.title or event.get("title_preciso")):
         order.title = event["title"]
     if event.get("image_url") and not order.image_url:
         order.image_url = event["image_url"]

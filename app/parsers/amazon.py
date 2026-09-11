@@ -148,10 +148,12 @@ def extract_image_url(html_body: str = "") -> str | None:
 #   "Llegada hoy" / "Llegada ma\u00f1ana"
 # Se guarda como texto tal cual. Normalizarlo a fecha exigir\u00eda adivinar el a\u00f1o
 # (Amazon no lo pone) y no aporta nada para ense\u00f1arlo en el panel.
+# "Llegada" en unos emails y "Llega" en otros (el de confirmaci\u00f3n de pedido usa
+# "Llega ma\u00f1ana", "Llega el jueves"). Con s\u00f3lo "Llegada" se perd\u00edan esos.
 ETA_PATTERNS = [
-    re.compile(r"Llegada\s+(entre\s+el\s+.{3,40}?\s+y\s+el\s+[^\n]{3,40})", re.IGNORECASE),
-    re.compile(r"Llegada\s+(el\s+[^\n]{3,50})", re.IGNORECASE),
-    re.compile(r"Llegada\s+(hoy|ma[n\u00f1]ana)\b", re.IGNORECASE),
+    re.compile(r"Llegad?a?\s+(entre\s+el\s+.{3,40}?\s+y\s+el\s+[^\n]{3,40})", re.IGNORECASE),
+    re.compile(r"Llegad?a?\s+(el\s+[^\n]{3,50})", re.IGNORECASE),
+    re.compile(r"Llegad?a?\s+(hoy|ma[n\u00f1]ana)\b", re.IGNORECASE),
 ]
 
 
@@ -164,6 +166,65 @@ def extract_eta(body_text: str = "") -> str | None:
         if m:
             return " ".join(m.group(1).split()).strip(" .,")
     return None
+
+
+# Un mismo email de confirmaci\u00f3n puede cubrir VARIOS pedidos. Amazon parte la
+# compra cuando los art\u00edculos salen de sitios distintos, y manda un solo correo
+# con un bloque por pedido:
+#
+#     Llega ma\u00f1ana                     <- fecha estimada del pedido 1
+#     Pedido n.\u00ba
+#     408-0917824-6197118
+#     * Adaptador de Cargador...       <- producto del pedido 1
+#     Total 11.09 EUR
+#     Llega el jueves                  <- y aqu\u00ed empieza el pedido 2
+#     Pedido n.\u00ba
+#     408-2438266-2656303
+#     * JZ Type-C 5V/2000mA...
+#
+# Como extract_order_id devuelve s\u00f3lo la PRIMERA coincidencia, el segundo pedido
+# desaparec\u00eda sin dejar rastro. Ojo con el orden dentro del bloque: la fecha va
+# ANTES del n\u00ba de pedido y el producto DESPU\u00c9S, as\u00ed que se busca cada una hacia
+# su lado.
+PRODUCTO_RE = re.compile(r"^\s*\*\s+(.{5,200}?)\s*$", re.MULTILINE)
+
+
+def extraer_pedidos_del_cuerpo(body_text: str) -> list[dict]:
+    """
+    Devuelve un bloque por pedido: {order_id, title, eta}. Lista vac\u00eda si el
+    cuerpo no trae ninguno anclado a la etiqueta "Pedido n.\u00ba".
+    """
+    if not body_text:
+        return []
+
+    marcas = list(ORDER_ID_LABELED_RE.finditer(body_text))
+    if not marcas:
+        return []
+
+    bloques = []
+    vistos = set()
+    for i, m in enumerate(marcas):
+        order_id = m.group(1)
+        if order_id in vistos:
+            continue
+        vistos.add(order_id)
+
+        desde = marcas[i - 1].end() if i else 0
+        hasta = marcas[i + 1].start() if i + 1 < len(marcas) else len(body_text)
+
+        # La fecha queda por detr\u00e1s del n\u00ba de pedido: se coge la \u00faltima que
+        # aparezca entre el pedido anterior y \u00e9ste.
+        etas = ETA_PATTERNS[0].findall(body_text[desde:m.start()]) \
+            or ETA_PATTERNS[1].findall(body_text[desde:m.start()]) \
+            or ETA_PATTERNS[2].findall(body_text[desde:m.start()])
+        eta = " ".join(etas[-1].split()).strip(" .,") if etas else None
+
+        # El producto, por delante.
+        producto = PRODUCTO_RE.search(body_text[m.end():hasta])
+        title = " ".join(producto.group(1).split()) if producto else None
+
+        bloques.append({"order_id": order_id, "title": title, "eta": eta})
+    return bloques
 
 
 QUOTE_CHARS = ' "\u201c\u201d\u2018\u2019'
@@ -238,13 +299,55 @@ def parse(sender: str, subject: str, body_text: str, message_id: str, event_date
     if status is None:
         status = status_desde_asunto_order_update(subject)
 
+    image_url = extract_image_url(html_body)
+
+    # Un email puede cubrir varios pedidos (ver extraer_pedidos_del_cuerpo). En
+    # ese caso se devuelve una lista, igual que hace el formato 'merge' de
+    # AliExpress; gmail_sync ya sabe tratar ambos casos.
+    bloques = extraer_pedidos_del_cuerpo(body_text)
+    if len(bloques) > 1:
+        eventos = []
+        for i, bloque in enumerate(bloques):
+            eventos.append({
+                "source": "amazon",
+                "order_id": bloque["order_id"],
+                # Sin shipmentId todavía: el email de "Enviado" de cada pedido
+                # traerá el suyo y adoptará este paquete provisional.
+                "package_id": None,
+                "status": status,
+                "status_label_raw": subject,
+                # El nombre sale del bloque, no del asunto: el asunto sólo
+                # nombra un producto ("JZ Type-C..." y 1 producto más) y le
+                # pondría el mismo título a los dos pedidos.
+                "title": bloque["title"] or clean_title(subject),
+                # Este titulo sale del bloque del propio pedido, no del asunto:
+                # es el bueno y puede pisar a uno anterior. El del asunto es una
+                # aproximacion, y en un email con varios pedidos nombra solo a
+                # uno, asi que a los demas les pondria el nombre equivocado.
+                "title_preciso": bool(bloque["title"]),
+                "image_url": image_url if i == 0 else None,
+                "eta": bloque["eta"],
+                # Único por pedido: si no, la deduplicación por message_id
+                # descartaría todos menos el primero.
+                "message_id": f"{message_id}-ord{i}",
+                "event_date": event_date,
+            })
+        return eventos
+
     order_id = extract_order_id(subject, body_text)
     shipment_id = extract_shipment_id(body_text)
-    image_url = extract_image_url(html_body)
     title = clean_title(subject)
     eta = extract_eta(body_text)
+    title_preciso = False
+    if bloques:
+        # Un solo pedido: el bloque afina el nombre y la fecha.
+        if bloques[0]["title"]:
+            title = bloques[0]["title"]
+            title_preciso = True
+        eta = bloques[0]["eta"] or eta
 
     return {
+        "title_preciso": title_preciso,
         "source": "amazon",
         "eta": eta,
         "order_id": order_id,
