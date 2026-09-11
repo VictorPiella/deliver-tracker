@@ -93,64 +93,111 @@ Los breakpoints en `app/` funcionan contra el código que corre dentro del conta
 
 ## Desplegar en Unraid
 
-La imagen se construye **en Windows** y se carga en Unraid por SSH. Unraid no compila nada y no hace falta ningún registro de imágenes.
+GitHub Actions construye la imagen en cada push y la publica en **ghcr.io**;
+Unraid sólo la descarga. La imagen se publica **únicamente si los tests pasan**,
+así que un fallo deja a Unraid con la versión anterior, que funcionaba.
 
-```powershell
-.\deploy\deploy-unraid.ps1 -UnraidHost 192.168.1.10
+```
+push a GitHub → Actions (tests → build → ghcr.io) → docker compose pull en Unraid
 ```
 
-El script hace: `docker build` → `docker save` → `scp` → `docker load` → `docker compose up -d`.
+### Puesta en marcha (una sola vez)
 
-### Antes del primer despliegue
+**1. Sube el código.** El workflow se dispara solo:
 
-1. **Acceso SSH sin contraseña** a Unraid (ver abajo).
-2. **Comprueba el dueño de appdata** y ajusta `PUID`/`PGID` en
-   `deploy/docker-compose.unraid.yml` si no es 99:100:
-
-   ```bash
-   ls -ldn /mnt/user/appdata/deliver-tracker
-   ```
-
-   > Esto importa más de lo que parece. La imagen crea su usuario con uid 1000,
-   > pero en Unraid appdata suele ser de `nobody:users` (99:100). Con el uid
-   > equivocado el container no puede escribir la base **ni reescribir
-   > `token.json` al refrescar el token de Gmail**, así que la sincronización
-   > se rompería una hora después de arrancar. El entrypoint se adapta al uid
-   > que le digas; `chown -R 1000:1000` no vale como alternativa, porque la
-   > herramienta *Docker Safe New Permissions* de Unraid lo revertiría.
-
-3. **Copia las credenciales de Gmail** al volumen persistente:
-
-   ```powershell
-   ssh root@192.168.1.10 "mkdir -p /mnt/user/appdata/deliver-tracker"
-   scp data\credentials.json data\token.json root@192.168.1.10:/mnt/user/appdata/deliver-tracker/
-   ```
-
-4. **Cambia `FLASK_SECRET_KEY`** en el compose remoto (el script no lo
-   sobrescribe si ya existe, justo para no pisar lo que edites allí).
-
-**Requisito previo:** acceso SSH sin contraseña a Unraid.
-
-```powershell
-type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh root@192.168.1.10 "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
+```bash
+git push
 ```
 
-En Unraid, asegúrate de que la clave persiste a reinicios (*Settings → Management Access*, o copiándola a `/boot/config/ssh/`).
+Mira la pestaña *Actions* del repo. Al terminar, el resumen del job dice qué
+etiqueta se ha publicado.
 
-### Qué deja en Unraid
+**2. Decide si el paquete es público o privado.**
+
+En GitHub: *tu perfil → Packages → deliver-tracker → Package settings*.
+
+- **Público**: Unraid descarga sin autenticarse. La imagen sólo lleva código, no
+  credenciales — esas viven en el volumen de Unraid, nunca en la imagen.
+- **Privado**: hay que autenticarse una vez en Unraid. Crea un token en
+  *GitHub → Settings → Developer settings → Personal access tokens (classic)*
+  con el permiso `read:packages`, y en Unraid:
+
+  ```bash
+  echo "TU_TOKEN" | docker login ghcr.io -u VictorPiella --password-stdin
+  ```
+
+**3. Prepara el volumen en Unraid.** Comprueba de quién es y ajusta `PUID`/`PGID`
+en el compose si no es 99:100:
+
+```bash
+mkdir -p /mnt/user/appdata/deliver-tracker
+ls -ldn /mnt/user/appdata/deliver-tracker
+```
+
+> Esto importa más de lo que parece. La imagen crea su usuario con uid 1000,
+> pero en Unraid appdata suele ser de `nobody:users` (99:100). Con el uid
+> equivocado el container no puede escribir la base **ni reescribir `token.json`
+> al refrescar el token de Gmail** — y eso no falla al arrancar, falla una hora
+> después, cuando caduca el access token, dejando la sincronización muerta sin
+> que nada lo cante. El entrypoint se adapta al uid que le digas;
+> `chown -R 1000:1000` no vale como alternativa, porque la herramienta *Docker
+> Safe New Permissions* de Unraid lo revertiría.
+
+**4. Copia las credenciales de Gmail** al volumen (no van en la imagen):
+
+```powershell
+scp data\credentials.json data\token.json root@TU_IP:/mnt/user/appdata/deliver-tracker/
+```
+
+**5. Coloca el compose y arranca.** Copia `deploy/docker-compose.unraid.yml` a
+Unraid como `docker-compose.yml` — por ejemplo en
+`/boot/config/plugins/compose.manager/projects/deliver-tracker/` si usas el
+plugin *Compose Manager*, o donde prefieras si lo lanzas por SSH. **Edita
+`FLASK_SECRET_KEY`** antes de levantarlo:
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+El panel queda en `http://TU_IP:5000`.
+
+### Actualizar
+
+Cada vez que quieras llevarte los cambios:
+
+```bash
+git push                                    # en Windows; Actions publica la imagen
+```
+
+```bash
+docker compose pull && docker compose up -d  # en Unraid
+```
+
+Sólo se descargan las capas que hayan cambiado, así que una actualización de
+código son unos pocos MB.
+
+### Qué queda en Unraid
 
 | Ruta | Contenido |
 |------|-----------|
-| `/boot/config/plugins/compose.manager/projects/deliver-tracker/docker-compose.yml` | El compose (copia de `deploy/docker-compose.unraid.yml`) |
-| `/mnt/user/appdata/deliver-tracker/` | `packages.db`, `credentials.json`, `token.json` — **lo único que hay que respaldar** |
+| `<carpeta del proyecto>/docker-compose.yml` | El compose (copia de `deploy/docker-compose.unraid.yml`) |
+| `/mnt/user/appdata/deliver-tracker/` | `packages.db`, `backups/`, `credentials.json`, `token.json` — **lo único que hay que respaldar** |
 
-El script **no sobrescribe** un `docker-compose.yml` que ya exista en Unraid, para no borrar la `FLASK_SECRET_KEY` ni las credenciales MQTT que hayas editado allí. La primera vez que lo despliegues, edita ese fichero y cambia `FLASK_SECRET_KEY`:
+### Alternativa sin GitHub
 
-```bash
-python -c "import secrets; print(secrets.token_hex(32))"
+Queda también `deploy/deploy-unraid.ps1`, que construye en Windows y empuja la
+imagen por SSH (`docker save` → `scp` → `docker load`). Sirve si algún día
+quieres desplegar algo sin pasar por GitHub, pero transfiere la imagen entera
+(~400 MB) en cada despliegue y necesita acceso SSH sin contraseña:
+
+```powershell
+type $env:USERPROFILE\.ssh\id_ed25519.pub | ssh root@TU_IP "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
+.\deploy\deploy-unraid.ps1 -UnraidHost TU_IP
 ```
-
-Opciones útiles: `-User`, `-RemoteDir`, `-Tag`, `-SkipCompose` (sólo carga la imagen). `Get-Help .\deploy\deploy-unraid.ps1 -Detailed` para el resto.
 
 ---
 

@@ -5,18 +5,18 @@
 #   /boot/config/plugins/compose.manager/projects/deliver-tracker/docker-compose.yml
 # (o cualquier carpeta si lo lanzas a mano por SSH)
 #
-# Despliegue desde Windows, en una orden:
-#   .\deploy\deploy-unraid.ps1 -UnraidHost 192.168.1.10
+# Actualizar a la ultima version publicada:
+#   docker compose pull && docker compose up -d
 #
-# A mano, si lo prefieres:
-#   docker compose pull            # no aplica: la imagen se carga con docker load
-#   docker compose up -d
+# La imagen sale de GitHub Actions en cada push (si los tests pasan). Si el
+# paquete de ghcr.io es privado, Unraid necesita autenticarse una vez:
+#   docker login ghcr.io -u VictorPiella --password-stdin   (con un PAT read:packages)
 services:
   deliver-tracker:
-    # Sin `build:` a propósito. La imagen se construye en Windows y se carga en
-    # Unraid con `docker load`; ver deploy/deploy-unraid.ps1. El tag debe
-    # coincidir con el que genera ese script.
-    image: deliver-tracker:latest
+    # La imagen la construye GitHub Actions y se publica en ghcr.io; aqui solo
+    # se descarga. Ver .github/workflows/publicar-imagen.yml.
+    #   docker compose pull && docker compose up -d
+    image: ghcr.io/victorpiella/deliver-tracker:latest
     container_name: deliver-tracker
     ports:
       - "5000:5000"
