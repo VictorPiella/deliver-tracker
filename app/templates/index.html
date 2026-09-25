@@ -2,6 +2,26 @@
 {% block title %}Paquetes en tránsito{% endblock %}
 {% block content %}
 
+{% if sync_error or sync_parado %}
+<div class="aviso-sync">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>
+    <path d="M12 9v4M12 17h.01"/>
+  </svg>
+  <div>
+    <strong>La sincronización no está funcionando.</strong>
+    Último escaneo con éxito: {{ ultimo_escaneo_rel }}.
+    {% if sync_error %}<br><span class="aviso-sync-detalle">{{ sync_error }}</span>{% endif %}
+    {% if sync_error and 'invalid_grant' in sync_error %}
+    <br>El permiso de Gmail ha caducado. Vuelve a autorizar con
+    <code>scripts.gmail_auth</code> — y publica la app en Google Cloud Console
+    para que deje de caducar cada 7 días.
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 {% if packages %}
 <section class="stats" role="group" aria-label="Filtrar paquetes">
   <button type="button" class="stat is-active" data-filter="todos">

@@ -38,7 +38,7 @@ from .models import (
 )
 from .timeutils import utcnow, to_utc_naive
 from .sync import evento_anclable, evento_ya_visto, ingest_event, ingest_carrier_event
-from .parsers import amazon, aliexpress, gls, correos
+from .parsers import amazon, aliexpress, gls, correos, shopify
 
 # --- Configuración ---
 # Todas ajustables por entorno; los valores por defecto sirven para un uso normal.
@@ -79,6 +79,17 @@ ALIEXPRESS_SENDER = "transaction@notice.aliexpress.com"
 GLS_SENDER_DOMAIN = gls.SENDER_DOMAIN
 CORREOS_SENDER_DOMAIN = correos.SENDER_DOMAIN
 
+# Shopify no tiene remitente: cada tienda manda desde su propio dominio (ver
+# parsers/shopify.py). Lo único común es el asunto de la plantilla, así que se
+# busca por ahí. Trae ruido a propósito — el parser mira el cuerpo y descarta
+# lo que no sea de verdad de Shopify.
+SHOPIFY_CLAUSE = (
+    'subject:((order OR pedido) AND (confirmed OR confirmado OR canceled '
+    'OR cancelled OR cancelado)) '
+    'OR subject:("on the way" OR "out for delivery" OR "has been delivered" '
+    'OR "en camino" OR "en reparto")'
+)
+
 
 def build_search_query(newer_than_days: int) -> str:
     """
@@ -88,7 +99,8 @@ def build_search_query(newer_than_days: int) -> str:
     amazon_clause = " OR ".join(f"from:{s}" for s in AMAZON_SENDERS)
     query = (
         f"({amazon_clause}) OR from:{ALIEXPRESS_SENDER} "
-        f"OR from:{GLS_SENDER_DOMAIN} OR from:{CORREOS_SENDER_DOMAIN}"
+        f"OR from:{GLS_SENDER_DOMAIN} OR from:{CORREOS_SENDER_DOMAIN} "
+        f"OR ({SHOPIFY_CLAUSE})"
     )
     query += f" newer_than:{newer_than_days}d"
     return query
@@ -201,8 +213,11 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
         # Solo pedimos el cuerpo completo (otra llamada a la API) si el mensaje
         # es de un remitente que efectivamente vamos a parsear; evita llamadas
         # de más a get_thread para mensajes irrelevantes que se cuelan en la query.
+        # Shopify se decide por el asunto, no por el remitente: no hay uno.
+        candidato_shopify = shopify.posible(subject)
         if not (amazon.matches(sender) or aliexpress.matches(sender)
-                or gls.matches(sender) or correos.matches(sender)):
+                or gls.matches(sender) or correos.matches(sender)
+                or candidato_shopify):
             irrelevant += 1
             continue
 
@@ -257,6 +272,25 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
             if created:
                 ingested += 1
                 log(f"[gmail_sync] + correos {parsed['status']:<16} {subject[:50]}")
+            else:
+                duplicated += 1
+            continue
+
+        if candidato_shopify and not (amazon.matches(sender) or aliexpress.matches(sender)):
+            event_date = parse_event_date(date_str)
+            parsed = shopify.parse(sender, subject, plaintext_body or "",
+                                   message_id, event_date, html_body=html_body or "")
+            if parsed is None:
+                # Lo normal: el filtro del asunto es amplio y aquí cae mucho
+                # email que no es de Shopify. No es un fallo de plantilla, así
+                # que no va a "sin reconocer" — si fuera allí, esa pantalla
+                # quedaría inservible de puro ruido.
+                irrelevant += 1
+                continue
+            created = ingest_event(session, parsed)
+            if created:
+                ingested += 1
+                log(f"[gmail_sync] + shopify {parsed['status']:<16} {subject[:50]}")
             else:
                 duplicated += 1
             continue

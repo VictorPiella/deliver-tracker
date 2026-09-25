@@ -286,6 +286,21 @@ def register_routes(app: Flask) -> None:
             "finalizados": sum(1 for p in data if p["status"] in STATUS_FINALES),
         }
         ultimo = get_last_sync(g.db)
+
+        # Si el escaneo lleva fallando, hay que decirlo donde se vea. El token
+        # de Gmail caduco y estuvo 7 dias sin sincronizar: el unico rastro
+        # estaba en los logs del container, y el panel seguia enseñando los
+        # paquetes de siempre como si nada.
+        from .worker import sync_state
+        estado = sync_state()
+        fallo = estado.get("last_error")
+        antiguedad_horas = ((utcnow() - ultimo).total_seconds() / 3600) if ultimo else None
+        # Dos veces el intervalo del worker: un retraso puntual no alarma, pero
+        # varias horas sin escanear ya es que algo va mal.
+        from .gmail_sync import SYNC_INTERVAL_MINUTES
+        umbral = max(3, (SYNC_INTERVAL_MINUTES * 2) / 60)
+        sync_parado = antiguedad_horas is not None and antiguedad_horas > umbral
+
         return render_template(
             "index.html",
             packages=data,
@@ -294,6 +309,8 @@ def register_routes(app: Flask) -> None:
             auto_status=AUTO_STATUS,
             ultimo_escaneo=ultimo,
             ultimo_escaneo_rel=humanizar_antiguedad(ultimo),
+            sync_error=fallo,
+            sync_parado=sync_parado,
         )
 
     @app.route("/package/<int:package_id>")

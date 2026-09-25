@@ -601,6 +601,7 @@ main {
 .thumb-fallback.aliexpress { background: var(--s-red-bg); color: var(--s-red); }
 .thumb-fallback.correos    { background: var(--s-blue-bg); color: var(--s-blue); }
 .thumb-fallback.gls        { background: var(--s-violet-bg); color: var(--s-violet); }
+.thumb-fallback.shopify    { background: var(--s-green-bg); color: var(--s-green); }
 
 .pkg-body { min-width: 0; }
 
@@ -653,6 +654,7 @@ main {
 .chip-aliexpress { background: var(--s-red-bg); color: var(--s-red); }
 .chip-correos    { background: var(--s-blue-bg); color: var(--s-blue); }
 .chip-gls        { background: var(--s-violet-bg); color: var(--s-violet); }
+.chip-shopify    { background: var(--s-green-bg); color: var(--s-green); }
 
 /* ----------------------------------------------------------------- estado */
 
@@ -902,6 +904,7 @@ main {
 }
 .detail-thumb-fallback.amazon     { background: var(--s-amber-bg); color: var(--s-amber); }
 .detail-thumb-fallback.aliexpress { background: var(--s-red-bg); color: var(--s-red); }
+.detail-thumb-fallback.shopify    { background: var(--s-green-bg); color: var(--s-green); }
 .detail-thumb-fallback.correos    { background: var(--s-blue-bg); color: var(--s-blue); }
 .detail-thumb-fallback.gls        { background: var(--s-violet-bg); color: var(--s-violet); }
 
@@ -1254,3 +1257,35 @@ a.thumb-wrap:hover .thumb { border-color: var(--accent); }
 /* El chevron de "ver detalle", junto al lapiz. */
 .btn-detalle { text-decoration: none; }
 .btn-detalle:hover { color: var(--accent); background: var(--surface-2); }
+
+
+/* Aviso de que el escaneo no va. Antes, que la sincronizacion llevara dias
+   rota solo se veia en los logs del container: el panel seguia enseñando los
+   paquetes de siempre, tan tranquilo. */
+.aviso-sync {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--s-red-bg);
+  border: 1px solid var(--s-red);
+  border-radius: var(--r);
+}
+.aviso-sync svg { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; color: var(--s-red); }
+.aviso-sync code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 1px 5px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.aviso-sync-detalle {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}

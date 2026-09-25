@@ -67,6 +67,15 @@ def url_de_seguimiento(source: str, order_id: str | None,
         # codigo postal (ver POSTAL_CODE).
         return "https://mygls.gls-spain.es/parcel-tracking"
 
+    if source == "shopify":
+        # No hay enlace posible. La pagina de estado de un pedido de Shopify
+        # vive en {tienda}/account/orders/{token}, y ese token solo esta dentro
+        # del propio email (en el boton "View your order"): no se puede
+        # reconstruir desde el numero de pedido. Y /account/orders a secas pide
+        # cuenta en la tienda, que muchas compras de invitado ni tienen.
+        # Mejor sin boton que con uno que lleva a una pantalla de login.
+        return None
+
     return None
 
 
