@@ -397,3 +397,121 @@ class TestElEmailLlegaHastaElPanel:
         from app.tracking import url_de_seguimiento
 
         assert url_de_seguimiento("shopify", "mitienda.com#10239") is None
+
+
+class TestLoQueEnseñoElEmailDeVerdad:
+    """
+    Comprobado contra el email real que motivó el parser (Smdge, #10239) y
+    contra los 43 correos del buzón que cruzan su filtro de asunto. Los
+    nombres de aquí son inventados a propósito: lo que se compra no tiene por
+    qué acabar en un repositorio público. Lo que se conserva es la forma.
+    """
+
+    def item(self, titulo, variante=None, imagen="https://cdn.shopify.com/x.png"):
+        v = (f'<span class="order-list__item-variant">{variante}</span>'
+             if variante else "")
+        return (f'<td class="order-list__image-cell">'
+                f'<img src="{imagen}" class="order-list__product-image"/></td>'
+                f'<td class="order-list__product-description-cell">'
+                f'<span class="order-list__item-title">{titulo}&nbsp;&times;&nbsp;1</span>{v}</td>')
+
+    def pedido(self, *items, numero="10239"):
+        return (f'<h2 class="order-number">Order #{numero}</h2>'
+                f'<div class="customer-info__item">x</div>'
+                + "".join(items))
+
+    def test_un_pedido_de_cuatro_lineas_no_se_presenta_como_una(self):
+        """
+        El pedido real traía cuatro artículos. Quedarse con el primero hacía
+        que el panel enseñara un solo producto para un paquete con cuatro
+        dentro: no es mentira, pero tampoco es verdad, que es lo peor.
+        """
+        html = self.pedido(
+            self.item("Juego de cartas", "Edición A"),
+            self.item("Juego de cartas", "Edición B"),
+            self.item("Juego de cartas", "Edición C"),
+            self.item("Guía completa"),
+        )
+        r = shopify.parse(REMITENTE, "Order #10239 confirmed", "", "m", FECHA,
+                          html_body=html)
+        assert r["title"] == "Juego de cartas y 3 productos más"
+
+    def test_dos_lineas_lo_dice_en_singular(self):
+        html = self.pedido(self.item("Cosa uno"), self.item("Cosa dos"))
+        r = shopify.parse(REMITENTE, "Order #10239 confirmed", "", "m", FECHA,
+                          html_body=html)
+        assert r["title"] == "Cosa uno y 1 producto más"
+
+    def test_con_una_sola_linea_la_variante_cabe_y_dice_algo(self):
+        html = self.pedido(self.item("Juego de cartas", "Edición A"))
+        r = shopify.parse(REMITENTE, "Order #10239 confirmed", "", "m", FECHA,
+                          html_body=html)
+        assert r["title"] == "Juego de cartas · Edición A"
+
+    def test_pero_no_se_repite_si_ya_esta_en_el_nombre(self):
+        html = self.pedido(self.item("Juego de cartas Edición A", "Edición A"))
+        r = shopify.parse(REMITENTE, "Order #10239 confirmed", "", "m", FECHA,
+                          html_body=html)
+        assert r["title"] == "Juego de cartas Edición A"
+
+    def test_se_listan_todos_los_articulos(self):
+        html = self.pedido(self.item("Uno"), self.item("Dos"), self.item("Tres"))
+        assert shopify.extraer_articulos(html) == ["Uno", "Dos", "Tres"]
+
+    def test_la_imagen_es_la_del_primer_articulo(self):
+        html = self.pedido(
+            self.item("Uno", imagen="https://cdn.shopify.com/primera.png"),
+            self.item("Dos", imagen="https://cdn.shopify.com/segunda.png"))
+        r = shopify.parse(REMITENTE, "Order #10239 confirmed", "", "m", FECHA,
+                          html_body=html)
+        assert r["image_url"] == "https://cdn.shopify.com/primera.png"
+
+
+class TestLasColisionesRealesDelBuzon:
+    """
+    De los 43 emails del buzón que cruzan el filtro de asunto de Shopify, sólo
+    uno lo es. Estos son los choques reales, no imaginados.
+    """
+
+    def test_aliexpress_dice_pedido_confirmado_y_no_es_shopify(self, db_path):
+        """
+        "Pedido 3076348326202839: pedido confirmado" cruza el filtro de asunto.
+        Si Shopify se lo quedara, AliExpress dejaría de funcionar.
+        """
+        from app.gmail_sync import run_sync
+        from app.models import Package, get_session
+
+        run_sync(
+            db_path,
+            lambda q: [{"id": "ali-1",
+                        "subject": "Pedido 3076348326202839: pedido confirmado",
+                        "sender": "AliExpress <transaction@notice.aliexpress.com>",
+                        "date": "2026-09-25T10:00:00+00:00"}],
+            lambda m: {"plaintext_body": "", "html_body": ""},
+            log=lambda *a: None)
+
+        s = get_session(db_path)
+        assert [p.source for p in s.query(Package).all()] == ["aliexpress"]
+        s.close()
+
+    def test_una_newsletter_que_dice_en_camino(self, db_path):
+        """
+        Del buzón: "Algo muy bueno en camino", de una lista de correo. Es
+        justo por esto que no basta con el asunto.
+        """
+        from app.gmail_sync import run_sync
+        from app.models import Package, UnparsedEmail, get_session
+
+        run_sync(
+            db_path,
+            lambda q: [{"id": "news-1", "subject": "Algo muy bueno en camino",
+                        "sender": "Alguien <hola@suboletin.com>",
+                        "date": "2026-09-25T10:00:00+00:00"}],
+            lambda m: {"plaintext_body": "Esta semana te cuento...",
+                       "html_body": "<html><body><p>Hola</p></body></html>"},
+            log=lambda *a: None)
+
+        s = get_session(db_path)
+        assert s.query(Package).count() == 0
+        assert s.query(UnparsedEmail).count() == 0
+        s.close()

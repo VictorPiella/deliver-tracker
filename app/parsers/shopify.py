@@ -103,6 +103,21 @@ TITULO_RE = re.compile(
 )
 CANTIDAD_COLA_RE = re.compile(r"\s*[x×]\s*\d+\s*$", re.IGNORECASE)
 
+# Un pedido casi nunca trae una sola cosa. El de smdge.com que dio origen a
+# esto traía CUATRO líneas, y quedarse con la primera hacía que el panel
+# enseñara "MOODIE SERIES - COUPLES INTIMACY CARDS" para un paquete con cuatro
+# artículos dentro: ni mentira ni verdad, que es lo peor.
+TODOS_LOS_TITULOS_RE = re.compile(
+    r'order-list__item-title[^>]*>(.*?)</span>', re.IGNORECASE | re.DOTALL
+)
+# La variante distingue líneas que se llaman igual ("Would You Rather Edition"
+# frente a "Dare or Dessert"). En ese pedido tres de las cuatro compartían
+# título y sólo se diferenciaban en esto.
+VARIANTE_RE = re.compile(
+    r'order-list__item-variant[^>]*>(.*?)</span>', re.IGNORECASE | re.DOTALL
+)
+ETIQUETAS_RE = re.compile(r"<[^>]+>")
+
 # La imagen del producto. El atributo class puede ir antes o después del src
 # según la versión de la plantilla, así que se prueban los dos órdenes.
 IMAGEN_RES = [
@@ -126,12 +141,45 @@ def _limpiar(texto: str) -> str:
     return re.sub(r"\s+", " ", texto).strip()
 
 
+def extraer_articulos(html_body: str) -> list[str]:
+    """Los nombres de todas las líneas del pedido, en orden y sin la cantidad."""
+    articulos = []
+    for m in TODOS_LOS_TITULOS_RE.finditer(html_body or ""):
+        crudo = ETIQUETAS_RE.sub("", m.group(1))
+        nombre = CANTIDAD_COLA_RE.sub("", _limpiar(crudo))
+        if nombre:
+            articulos.append(nombre)
+    return articulos
+
+
+def extraer_variantes(html_body: str) -> list[str]:
+    return [v for v in (_limpiar(ETIQUETAS_RE.sub("", m.group(1)))
+                        for m in VARIANTE_RE.finditer(html_body or "")) if v]
+
+
 def extraer_titulo(html_body: str) -> str | None:
-    m = TITULO_RE.search(html_body or "")
-    if not m:
+    """
+    El título del paquete. Con varias líneas se dice cuántas son, en lugar de
+    enseñar la primera como si fuera todo lo que hay dentro. El "y N productos
+    más" es la misma fórmula que usa Amazon en sus asuntos, para que las dos
+    fuentes se lean igual en el panel.
+    """
+    articulos = extraer_articulos(html_body)
+    if not articulos:
         return None
-    titulo = CANTIDAD_COLA_RE.sub("", _limpiar(m.group(1)))
-    return titulo or None
+
+    primero = articulos[0]
+    if len(articulos) == 1:
+        # Con un solo artículo, la variante cabe y dice algo ("Edición Would
+        # You Rather"). Con varios sobra: no se sabría a cuál se refiere.
+        variantes = extraer_variantes(html_body)
+        if variantes and variantes[0].lower() not in primero.lower():
+            return f"{primero} · {variantes[0]}"
+        return primero
+
+    restantes = len(articulos) - 1
+    plural = "productos" if restantes > 1 else "producto"
+    return f"{primero} y {restantes} {plural} más"
 
 
 def extraer_imagen(html_body: str) -> str | None:
