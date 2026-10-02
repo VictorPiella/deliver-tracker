@@ -274,6 +274,7 @@ def register_routes(app: Flask) -> None:
                 p.order.external_order_id if p.order else None,
                 p.external_package_id,
                 p.courier_tracking_number,
+                guardada=p.tracking_url,
             ),
             "seguimiento_a_mano": requiere_datos_a_mano(p.source),
         } for p in packages]
@@ -349,6 +350,7 @@ def register_routes(app: Flask) -> None:
                 p.order.external_order_id if p.order else None,
                 p.external_package_id,
                 p.courier_tracking_number,
+                guardada=p.tracking_url,
             ),
             # Si lo reparte otro (un Amazon que trae Correos), su pagina tambien
             # sirve, y suele estar mas al dia que la de la tienda.

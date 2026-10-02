@@ -124,6 +124,8 @@ def merge_packages(session, origen: Package, destino: Package) -> int:
         destino.courier_tracking_number = origen.courier_tracking_number
     if origen.eta and not destino.eta:
         destino.eta = origen.eta
+    if origen.tracking_url and not destino.tracking_url:
+        destino.tracking_url = origen.tracking_url
     # Y el destino suele ser el de la tienda: es el que trae nombre e imagen.
     if origen.order and destino.order:
         if origen.order.title and not destino.order.title:
@@ -318,6 +320,10 @@ def ingest_event(session, event: dict) -> bool:
         package.courier_tracking_number = event["courier_tracking_number"]
     if event.get("courier") and not package.courier:
         package.courier = event["courier"]
+    # La URL SI se sobreescribe cuando llega una nueva: la del email de envio es
+    # mas util que la del de confirmacion, y un token viejo puede haber caducado.
+    if event.get("tracking_url"):
+        package.tracking_url = event["tracking_url"]
     # La ETA sí se pisa cuando llega una nueva: Amazon la reajusta en cada
     # email, y la última es la buena.
     if event.get("eta"):

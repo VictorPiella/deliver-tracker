@@ -515,3 +515,200 @@ class TestLasColisionesRealesDelBuzon:
         assert s.query(Package).count() == 0
         assert s.query(UnparsedEmail).count() == 0
         s.close()
+
+
+class TestElEnvioNoPisaLoQueDiceElPedido:
+    """
+    Del email de envío real: el pedido tenía CUATRO líneas y su email de envío
+    sólo listaba TRES — "The last items in your order are on the way", o sea un
+    envío parcial. Como los dos títulos se daban por precisos, el del envío
+    pisaba al del pedido y el panel acababa enseñando menos cosas de las que se
+    habían comprado.
+    """
+
+    def item(self, titulo):
+        return (f'<td class="order-list__image-cell">'
+                f'<img src="https://cdn.shopify.com/x.png" class="order-list__product-image"/></td>'
+                f'<td class="order-list__product-description-cell">'
+                f'<span class="order-list__item-title">{titulo}&nbsp;&times;&nbsp;1</span></td>')
+
+    def pedido(self, *titulos):
+        return ('<h2 class="order-number">Order #10239</h2>'
+                '<div class="customer-info__item">x</div>'
+                + "".join(self.item(t) for t in titulos))
+
+    def test_la_confirmacion_si_es_precisa(self):
+        r = shopify.parse(REMITENTE, "Order #10239 confirmed", "", "m", FECHA,
+                          html_body=self.pedido("A", "B", "C", "D"))
+        assert r["title_preciso"] is True
+        assert r["title"] == "A y 3 productos más"
+
+    def test_el_envio_no(self):
+        r = shopify.parse(REMITENTE, "A shipment from order #10239 is on the way",
+                          "", "m", FECHA, html_body=self.pedido("A", "B", "C"))
+        assert r["title_preciso"] is False
+
+    def test_y_asi_el_pedido_conserva_su_titulo_completo(self, db_path):
+        from app.gmail_sync import run_sync
+        from app.models import Package, get_session
+
+        def correo(subject, id):
+            return lambda q: [{"id": id, "subject": subject, "sender": REMITENTE,
+                               "date": "2026-09-25T10:00:00+00:00"}]
+
+        cuatro, tres = self.pedido("A", "B", "C", "D"), self.pedido("A", "B", "C")
+        run_sync(db_path, correo("Order #10239 confirmed", "c1"),
+                 lambda m: {"plaintext_body": "", "html_body": cuatro},
+                 log=lambda *a: None)
+        run_sync(db_path,
+                 correo("A shipment from order #10239 is on the way", "e1"),
+                 lambda m: {"plaintext_body": "", "html_body": tres},
+                 log=lambda *a: None)
+
+        s = get_session(db_path)
+        p = s.query(Package).one()
+        assert p.status == "shipped"                     # el estado SI avanza
+        assert p.order.title == "A y 3 productos más"    # el titulo no se encoge
+        s.close()
+
+
+class TestElTransportistaYSuEnlace:
+    def test_se_saca_el_nombre_del_transportista(self):
+        """Del email real: "YunExpress tracking number: YT2626900701670433"."""
+        assert shopify.extraer_transportista(
+            "YunExpress tracking number: YT2626900701670433") == "yunexpress"
+
+    def test_no_se_confunde_una_palabra_cualquiera_con_un_transportista(self):
+        assert shopify.extraer_transportista("Your tracking number: ABC123456") is None
+        assert shopify.extraer_transportista("Shipment tracking number: ABC123456") is None
+
+    def test_el_transportista_llega_al_paquete(self, db_path):
+        from app.gmail_sync import run_sync
+        from app.models import Package, get_session
+
+        html = ('<h2 class="order-number">Order #10239</h2>'
+                '<div class="customer-info__item">x</div>'
+                '<span class="order-list__item-title">Cosa</span>')
+        run_sync(db_path,
+                 lambda q: [{"id": "e1",
+                             "subject": "A shipment from order #10239 is on the way",
+                             "sender": REMITENTE,
+                             "date": "2026-09-27T10:00:00+00:00"}],
+                 lambda m: {"plaintext_body": "YunExpress tracking number: YT2626900701670433",
+                            "html_body": html},
+                 log=lambda *a: None)
+
+        s = get_session(db_path)
+        p = s.query(Package).one()
+        assert p.courier == "yunexpress"
+        assert p.courier_tracking_number == "YT2626900701670433"
+        s.close()
+
+
+class TestLaUrlQueVieneDentroDelEmail:
+    """
+    La página de estado del pedido es el único enlace útil que trae el email, y
+    no se puede reconstruir: lleva dos tokens que sólo existen ahí. Antes se
+    tiraba y el paquete se quedaba sin ningún botón.
+    """
+
+    URL = ("https://mitienda.com/95602934106/orders/"
+           "eaa95e51c85aed247a761af899e612c5/authenticate?key=shcct_ABC123")
+
+    def cuerpo(self, url=None):
+        return f"Order #10239\n\nView your order\n( {url or self.URL} )\n"
+
+    def test_se_saca_del_texto_plano(self):
+        assert shopify.extraer_url_de_estado(self.cuerpo()) == self.URL
+
+    def test_se_recompone_si_el_email_la_ha_partido_en_varias_lineas(self):
+        """Los emails cortan las URLs largas; la del pedido real medía 975 caracteres."""
+        partida = self.URL[:40] + "\n   " + self.URL[40:80] + "\n   " + self.URL[80:]
+        assert shopify.extraer_url_de_estado(f"( {partida} )") == self.URL
+
+    def test_un_parentesis_que_no_lleva_la_url_del_pedido_se_ignora(self):
+        assert shopify.extraer_url_de_estado(
+            "Baja ( https://mitienda.com/unsubscribe?x=1 )") is None
+
+    def test_sin_parentesis_no_hay_url(self):
+        assert shopify.extraer_url_de_estado("No hay enlaces aqui") is None
+
+    def test_se_guarda_en_el_paquete(self, db_path):
+        from app.gmail_sync import run_sync
+        from app.models import Package, get_session
+
+        html = ('<h2 class="order-number">Order #10239</h2>'
+                '<div class="customer-info__item">x</div>'
+                '<span class="order-list__item-title">Cosa</span>')
+        run_sync(db_path,
+                 lambda q: [{"id": "c1", "subject": "Order #10239 confirmed",
+                             "sender": REMITENTE,
+                             "date": "2026-09-25T10:00:00+00:00"}],
+                 lambda m: {"plaintext_body": self.cuerpo(), "html_body": html},
+                 log=lambda *a: None)
+
+        s = get_session(db_path)
+        assert s.query(Package).one().tracking_url == self.URL
+        s.close()
+
+    def test_el_panel_la_usa_como_enlace_de_seguimiento(self):
+        from app.tracking import url_de_seguimiento
+
+        # Sin ella, Shopify no tiene enlace posible.
+        assert url_de_seguimiento("shopify", "mitienda.com#10239") is None
+        # Con ella, se usa tal cual.
+        assert url_de_seguimiento("shopify", "mitienda.com#10239",
+                                  guardada=self.URL) == self.URL
+
+    def test_manda_sobre_la_url_deducida_de_cualquier_fuente(self):
+        """
+        Si el email dice a dónde ir, eso vale más que cualquier formato deducido
+        aquí a partir del número de pedido.
+        """
+        from app.tracking import url_de_seguimiento
+
+        deducida = url_de_seguimiento("amazon", "406-0254524-0145135")
+        assert "amazon.es" in deducida
+        assert url_de_seguimiento("amazon", "406-0254524-0145135",
+                                  guardada=self.URL) == self.URL
+
+    def test_un_email_mas_nuevo_refresca_la_url(self, db_path):
+        """
+        Los tokens caducan, así que la del email de envío sustituye a la del de
+        confirmación en vez de respetarla.
+        """
+        from app.models import Package, get_session
+        from app.sync import ingest_event
+
+        s = get_session(db_path)
+        base = {"source": "shopify", "order_id": "mitienda.com#10239",
+                "package_id": "mitienda.com#10239", "status_label_raw": "x",
+                "title": "Cosa", "image_url": None, "event_date": FECHA}
+        ingest_event(s, {**base, "status": "ordered", "message_id": "m1",
+                         "tracking_url": self.URL})
+        ingest_event(s, {**base, "status": "shipped", "message_id": "m2",
+                         "tracking_url": self.URL + "-NUEVA"})
+        assert s.query(Package).one().tracking_url == self.URL + "-NUEVA"
+        s.close()
+
+    def test_la_url_no_aparece_en_los_logs(self, db_path):
+        """
+        Es una credencial: quien la tenga ve el pedido sin identificarse. No
+        tiene por qué quedarse escrita en los logs del container.
+        """
+        from app.gmail_sync import run_sync
+
+        html = ('<h2 class="order-number">Order #10239</h2>'
+                '<div class="customer-info__item">x</div>'
+                '<span class="order-list__item-title">Cosa</span>')
+        lineas = []
+        run_sync(db_path,
+                 lambda q: [{"id": "c1", "subject": "Order #10239 confirmed",
+                             "sender": REMITENTE,
+                             "date": "2026-09-25T10:00:00+00:00"}],
+                 lambda m: {"plaintext_body": self.cuerpo(), "html_body": html},
+                 log=lambda *a: lineas.append(" ".join(str(x) for x in a)))
+
+        registro = "\n".join(lineas)
+        assert "shcct_" not in registro
+        assert "/orders/" not in registro

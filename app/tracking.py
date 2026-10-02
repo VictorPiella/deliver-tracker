@@ -21,11 +21,19 @@ ALIEXPRESS_ORDER_RE = re.compile(r"^\d{12,20}$")
 
 def url_de_seguimiento(source: str, order_id: str | None,
                        package_id: str | None = None,
-                       tracking_number: str | None = None) -> str | None:
+                       tracking_number: str | None = None,
+                       guardada: str | None = None) -> str | None:
     """
     Devuelve la URL a la que llevar al usuario, o None si no se puede construir
     una fiable. Mejor no poner botón que poner uno que lleva a un 404.
+
+    'guardada' es la URL que venía dentro del email (Package.tracking_url) y
+    manda sobre todo lo demás: si el propio email dice a dónde ir, eso es más
+    fiable que cualquier formato deducido aquí.
     """
+    if guardada:
+        return guardada
+
     source = (source or "").lower()
 
     if source == "amazon":
@@ -68,12 +76,18 @@ def url_de_seguimiento(source: str, order_id: str | None,
         return "https://mygls.gls-spain.es/parcel-tracking"
 
     if source == "shopify":
-        # No hay enlace posible. La pagina de estado de un pedido de Shopify
-        # vive en {tienda}/account/orders/{token}, y ese token solo esta dentro
-        # del propio email (en el boton "View your order"): no se puede
-        # reconstruir desde el numero de pedido. Y /account/orders a secas pide
-        # cuenta en la tienda, que muchas compras de invitado ni tienen.
-        # Mejor sin boton que con uno que lleva a una pantalla de login.
+        # Aqui no hay nada que construir: el token de la pagina de estado del
+        # pedido solo existe dentro del email. Pero ya no se tira — se guarda al
+        # leerlo y llega por 'guardada', que se ha resuelto arriba. Si falta
+        # (paquetes de antes de guardarla), no hay enlace y punto: inventar un
+        # /account/orders llevaria a una pantalla de login.
+        #
+        # Lo que NO se hace es deducir la pagina del buscador de la tienda
+        # ({tienda}/apps/trackyourorder?nums=...). Ese /apps/<lo-que-sea> es un
+        # App Proxy de Shopify y la ruta la elige cada tienda segun la app de
+        # seguimiento que haya instalado (/apps/track, /apps/parcelpanel,
+        # /apps/track123...). Funciona en la tienda donde se vio y da un 404 en
+        # la siguiente.
         return None
 
     return None

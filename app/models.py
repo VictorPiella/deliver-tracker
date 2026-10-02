@@ -65,6 +65,15 @@ class Package(Base):
     # se pisa al escanear.
     alias = Column(String)
     eta = Column(String)                                # fecha estimada de entrega (texto libre del email)
+    # URL de seguimiento que venia DENTRO del email, cuando no hay forma de
+    # construirla. Shopify es el caso: su pagina de estado del pedido vive en
+    # {tienda}/{id}/orders/<token>/authenticate?key=<token>, y esos tokens solo
+    # existen en el email. Antes se descartaba y el paquete se quedaba sin
+    # ningun enlace util; guardarla es la unica manera de tenerlo.
+    #
+    # OJO: es una credencial. Quien tenga esta URL ve el pedido sin
+    # identificarse. No sacarla en logs.
+    tracking_url = Column(String)
     # SIN onupdate a proposito. Con el, CUALQUIER escritura en la fila reescribia
     # la fecha: restaurar un paquete de la papelera, aprender su transportista o
     # guardarle el tracking lo dejaba como "actualizado ahora mismo", aunque el
@@ -262,6 +271,8 @@ _MIGRATIONS = [
      "ALTER TABLE packages ADD COLUMN deleted_at DATETIME"),
     ("packages", "alias",
      "ALTER TABLE packages ADD COLUMN alias VARCHAR"),
+    ("packages", "tracking_url",
+     "ALTER TABLE packages ADD COLUMN tracking_url VARCHAR"),
 ]
 
 

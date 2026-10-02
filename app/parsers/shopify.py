@@ -132,6 +132,53 @@ SEGUIMIENTO_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Shopify suele poner el transportista delante: "YunExpress tracking number:
+# YT2626900701670433". El numero ya lo cogia el patron de arriba, pero el
+# nombre se tiraba, y sin el el panel no sabe decir quien lo lleva.
+TRANSPORTISTA_RE = re.compile(
+    r"([A-Za-z][A-Za-z0-9 .&-]{1,28}?)\s+tracking\s*(?:number|no\.?)\s*:?\s*"
+    r"([A-Z0-9][A-Z0-9-]{5,})",
+    re.IGNORECASE,
+)
+# Palabras que no son un transportista aunque caigan delante de "tracking number".
+NO_ES_TRANSPORTISTA = {"your", "the", "a", "this", "shipment", "order", "parcel", "my"}
+
+# La pagina de estado del pedido, que es el UNICO enlace util que trae el email:
+# https://tienda.com/95602934106/orders/<token>/authenticate?key=<token>
+# Comprobada contra la de verdad: responde 200 y ensena el pedido sin
+# identificarse. Solo aparece en la parte de texto plano del email, no en el
+# HTML, y viene partida en varias lineas dentro de un "( ... )", asi que hay que
+# recomponerla antes de nada.
+URL_ESTADO_RE = re.compile(
+    r"\(\s*(https?://[^\s)]+(?:\s+[^\s)]+)*)\s*\)"
+)
+
+
+def extraer_url_de_estado(body_text: str) -> str | None:
+    """
+    La URL de la pagina de estado del pedido, recompuesta si el email la ha
+    partido en varias lineas.
+
+    Es una credencial: quien la tenga ve el pedido sin identificarse. Por eso no
+    se escribe en ningun log.
+    """
+    for m in URL_ESTADO_RE.finditer(body_text or ""):
+        url = re.sub(r"\s+", "", m.group(1))
+        if "/orders/" in url:
+            return url
+    return None
+
+
+def extraer_transportista(texto: str) -> str | None:
+    """El nombre del transportista, en minusculas y sin espacios: "yunexpress"."""
+    m = TRANSPORTISTA_RE.search(texto or "")
+    if not m:
+        return None
+    nombre = m.group(1).strip().split()[-1]
+    if nombre.lower() in NO_ES_TRANSPORTISTA:
+        return None
+    return nombre.lower()
+
 
 def _limpiar(texto: str) -> str:
     texto = html_mod.unescape(texto or "")
@@ -284,6 +331,7 @@ def parse(sender: str, subject: str, body_text: str, message_id: str, event_date
     texto = _limpiar(body_text)
     m = SEGUIMIENTO_RE.search(texto) or SEGUIMIENTO_RE.search(html_body or "")
     tracking = m.group(1) if m else None
+    transportista = extraer_transportista(texto) or extraer_transportista(html_body or "")
 
     titulo_real = extraer_titulo(html_body)
     # Al menos que se vea de quién es: es más útil que un id a secas.
@@ -297,12 +345,17 @@ def parse(sender: str, subject: str, body_text: str, message_id: str, event_date
         "status": estado,
         "status_label_raw": subject,
         "title": titulo,
-        # El nombre del producto sale del email de confirmación, que es el único
-        # que lista lo comprado. Los de envío/entrega traen un título de relleno
-        # que no debe pisar al bueno.
-        "title_preciso": bool(titulo_real),
+        # Sólo el email de confirmación dice lo que tiene el PEDIDO. Los de
+        # envío listan lo que va en ESE envío, que puede ser una parte: el
+        # pedido real tenía cuatro líneas y su email de envío sólo tres ("The
+        # last items in your order are on the way"). Dando por preciso ese
+        # título, el envío pisaba al del pedido y el panel pasaba a enseñar
+        # menos cosas de las que se habían comprado.
+        "title_preciso": bool(titulo_real) and estado == "ordered",
         "image_url": extraer_imagen(html_body),
+        "courier": transportista,
         "courier_tracking_number": tracking,
+        "tracking_url": extraer_url_de_estado(body_text),
         "tienda": nombre,
         "message_id": message_id,
         "event_date": event_date,
