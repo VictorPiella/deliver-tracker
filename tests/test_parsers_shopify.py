@@ -793,3 +793,237 @@ class TestUnReescaneoRellenaLoQueFaltaba:
         ingest_event(s, {**self.BASE, "event_date": FECHA, "status": "delivered"})
         assert s.query(Package).one().status == "shipped"
         s.close()
+
+
+class TestCadaEnvioSeLlamaPorLoQueLleva:
+    """
+    Reportado mirando el panel: "veo muchos repetidos". No lo eran. Un pedido de
+    Amazon con dos productos llega en DOS envíos, y el título vivía en el Order,
+    compartido por todos sus paquetes — así que las dos filas enseñaban el mismo
+    nombre y parecían el mismo paquete repetido.
+    """
+
+    def evento(self, **kw):
+        base = {"source": "amazon", "order_id": "408-0898802-9786726",
+                "status": "shipped", "status_label_raw": "x", "image_url": None,
+                "event_date": FECHA}
+        base.update(kw)
+        return base
+
+    def test_dos_envios_de_un_pedido_no_se_llaman_igual(self, db_path):
+        from app.models import Package, get_session
+        from app.sync import ingest_event
+
+        s = get_session(db_path)
+        ingest_event(s, self.evento(package_id="ENVIO1", message_id="m1",
+                                    title="VOANZO Rodillo de Pintura"))
+        ingest_event(s, self.evento(package_id="ENVIO2", message_id="m2",
+                                    title="DollaTek Pantalla Digital"))
+
+        titulos = {p.title for p in s.query(Package).all()}
+        assert titulos == {"VOANZO Rodillo de Pintura", "DollaTek Pantalla Digital"}
+        s.close()
+
+    def test_el_panel_los_enseña_distintos(self, client, db_path):
+        from app.models import get_session
+        from app.sync import ingest_event
+
+        s = get_session(db_path)
+        ingest_event(s, self.evento(package_id="ENVIO1", message_id="m1",
+                                    title="VOANZO Rodillo de Pintura"))
+        ingest_event(s, self.evento(package_id="ENVIO2", message_id="m2",
+                                    title="DollaTek Pantalla Digital"))
+        s.close()
+
+        html = client.get("/").get_data(as_text=True)
+        assert "VOANZO Rodillo de Pintura" in html
+        assert "DollaTek Pantalla Digital" in html
+
+    def test_el_alias_sigue_mandando_sobre_el_del_envio(self, client, db_path):
+        from app.models import Package, get_session
+        from app.sync import ingest_event
+
+        s = get_session(db_path)
+        ingest_event(s, self.evento(package_id="ENVIO1", message_id="m1",
+                                    title="Nombre del email"))
+        pid = s.query(Package).one().id
+        s.close()
+
+        client.post(f"/package/{pid}/rename", data={"alias": "El rodillo"})
+        datos = [p for p in client.get("/api/packages").get_json() if p["id"] == pid][0]
+        assert datos["title"] == "El rodillo"
+
+    def test_si_el_envio_no_tiene_nombre_se_usa_el_del_pedido(self, db_path):
+        """Los paquetes de antes de esto tienen title a None y no deben quedarse en blanco."""
+        from app.models import Package, get_session
+        from app.sync import ingest_event
+
+        s = get_session(db_path)
+        ingest_event(s, self.evento(package_id="ENVIO1", message_id="m1",
+                                    title="Nombre del pedido"))
+        p = s.query(Package).one()
+        p.title = None           # como estaba guardado antes
+        s.commit()
+        assert p.order.title == "Nombre del pedido"
+        s.close()
+
+
+class TestElDesgloseDelPedido:
+    """
+    "no podemos ampliar la info de envio?" — sí: el email lista todo lo que se
+    compró, y de eso sólo guardábamos un titular con un "y N productos más".
+    """
+
+    def item(self, titulo, variante=None, cantidad=1, imagen=None):
+        v = f'<span class="order-list__item-variant">{variante}</span>' if variante else ""
+        img = (f'<img src="{imagen}" class="order-list__product-image"/>' if imagen else "")
+        return (f'<td class="order-list__image-cell">{img}</td>'
+                f'<td class="order-list__product-description-cell">'
+                f'<span class="order-list__item-title">{titulo}&nbsp;&times;&nbsp;{cantidad}</span>{v}</td>')
+
+    def pedido(self, *items):
+        return ('<h2 class="order-number">Order #10239</h2>'
+                '<div class="customer-info__item">x</div>' + "".join(items))
+
+    HTML_REAL = property(lambda self: self.pedido(
+        self.item("Juego de cartas", "Edición A", imagen="https://cdn.shopify.com/a.png"),
+        self.item("Juego de cartas", "Edición B", imagen="https://cdn.shopify.com/b.png"),
+        self.item("Juego de cartas", "Edición C", imagen="https://cdn.shopify.com/c.png"),
+        self.item("Guía completa", cantidad=2),
+    ))
+
+    def test_se_sacan_las_cuatro_lineas(self):
+        arts = shopify.extraer_articulos_detallados(self.HTML_REAL)
+        assert len(arts) == 4
+
+    def test_cada_una_con_su_variante(self):
+        """
+        Lo que hace falta de verdad: tres líneas se llaman igual y sólo la
+        variante las distingue.
+        """
+        arts = shopify.extraer_articulos_detallados(self.HTML_REAL)
+        assert [a["variant"] for a in arts] == ["Edición A", "Edición B", "Edición C", None]
+
+    def test_cada_una_con_su_imagen(self):
+        arts = shopify.extraer_articulos_detallados(self.HTML_REAL)
+        assert arts[0]["image_url"].endswith("a.png")
+        assert arts[1]["image_url"].endswith("b.png")
+        assert arts[2]["image_url"].endswith("c.png")
+        assert arts[3]["image_url"] is None
+
+    def test_una_variante_que_falta_no_desplaza_a_las_demas(self):
+        """
+        Recogerlas en listas paralelas parecía más simple, pero al faltar una
+        variante todas las siguientes se emparejaban con el artículo anterior.
+        """
+        arts = shopify.extraer_articulos_detallados(self.pedido(
+            self.item("Primero"),                       # sin variante
+            self.item("Segundo", "La suya"),
+        ))
+        assert arts[0]["variant"] is None
+        assert arts[1]["variant"] == "La suya"
+
+    def test_se_guarda_la_cantidad(self):
+        arts = shopify.extraer_articulos_detallados(self.HTML_REAL)
+        assert [a["quantity"] for a in arts] == [1, 1, 1, 2]
+
+    def test_sin_plantilla_no_hay_articulos(self):
+        assert shopify.extraer_articulos_detallados("<p>nada</p>") == []
+
+    def test_el_titular_sigue_saliendo_del_desglose(self):
+        """El resumen de la lista y el desglose de la ficha no se contradicen."""
+        r = shopify.parse(REMITENTE, "Order #10239 confirmed", "", "m", FECHA,
+                          html_body=self.HTML_REAL)
+        assert r["title"] == "Juego de cartas y 3 productos más"
+        assert len(r["items"]) == 4
+
+
+class TestElDesgloseLlegaALaFicha:
+    def sembrar(self, db_path, html, subject="Order #10239 confirmed", id="c1"):
+        from app.gmail_sync import run_sync
+        run_sync(db_path,
+                 lambda q: [{"id": id, "subject": subject, "sender": REMITENTE,
+                             "date": "2026-09-25T10:00:00+00:00"}],
+                 lambda m: {"plaintext_body": "", "html_body": html},
+                 log=lambda *a: None)
+
+    def pedido_de_cuatro(self):
+        t = TestElDesgloseDelPedido()
+        return t.HTML_REAL
+
+    def test_se_guardan_en_la_base(self, db_path):
+        from app.models import Order, get_session
+
+        self.sembrar(db_path, self.pedido_de_cuatro())
+        s = get_session(db_path)
+        o = s.query(Order).one()
+        assert [a.title for a in o.items] == [
+            "Juego de cartas", "Juego de cartas", "Juego de cartas", "Guía completa"]
+        assert o.items[0].posicion == 0 and o.items[3].posicion == 3
+        s.close()
+
+    def test_se_ven_en_la_ficha_con_su_variante(self, client, db_path):
+        from app.models import Package, get_session
+
+        self.sembrar(db_path, self.pedido_de_cuatro())
+        s = get_session(db_path)
+        pid = s.query(Package).one().id
+        s.close()
+
+        html = client.get(f"/package/{pid}").get_data(as_text=True)
+        assert "Contenido · 4 artículos" in html
+        assert "Guía completa" in html
+        for v in ("Edición A", "Edición B", "Edición C"):
+            assert v in html
+
+    def test_un_envio_parcial_no_encoge_el_desglose(self, db_path):
+        """
+        El pedido real tenía cuatro líneas y su email de envío sólo tres. Si el
+        envío pisara, la ficha pasaría a enseñar menos de lo que se compró.
+        """
+        from app.models import Order, get_session
+
+        t = TestElDesgloseDelPedido()
+        self.sembrar(db_path, self.pedido_de_cuatro())
+        self.sembrar(db_path, t.pedido(t.item("Juego de cartas", "Edición A")),
+                     subject="A shipment from order #10239 is on the way", id="e1")
+
+        s = get_session(db_path)
+        assert len(s.query(Order).one().items) == 4
+        s.close()
+
+    def test_pero_si_no_habia_nada_el_envio_sirve(self, db_path):
+        """Mejor el desglose del envío que una ficha vacía."""
+        from app.models import Order, get_session
+
+        t = TestElDesgloseDelPedido()
+        self.sembrar(db_path, t.pedido(t.item("Juego de cartas", "Edición A")),
+                     subject="A shipment from order #10239 is on the way", id="e1")
+
+        s = get_session(db_path)
+        assert len(s.query(Order).one().items) == 1
+        s.close()
+
+    def test_reescanear_no_los_duplica(self, db_path):
+        from app.models import Order, get_session
+
+        self.sembrar(db_path, self.pedido_de_cuatro())
+        self.sembrar(db_path, self.pedido_de_cuatro())
+
+        s = get_session(db_path)
+        assert len(s.query(Order).one().items) == 4
+        s.close()
+
+    def test_un_paquete_sin_desglose_no_enseña_la_seccion(self, client, db_path):
+        from app.models import Package, get_session
+        from app.sync import ingest_event
+
+        s = get_session(db_path)
+        ingest_event(s, {"source": "amazon", "order_id": "408-1", "package_id": "P1",
+                         "status": "shipped", "status_label_raw": "x", "title": "Cosa",
+                         "image_url": None, "message_id": "m1", "event_date": FECHA})
+        pid = s.query(Package).one().id
+        s.close()
+
+        html = client.get(f"/package/{pid}").get_data(as_text=True)
+        assert "Contenido ·" not in html

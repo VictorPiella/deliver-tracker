@@ -1289,3 +1289,50 @@ a.thumb-wrap:hover .thumb { border-color: var(--accent); }
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }
+
+
+/* ------------------------------------------- contenido del pedido (ficha) */
+/* Un pedido con cuatro cosas dentro se resumia en "X y 3 productos mas". El
+   resumen sigue valiendo para la lista, pero en la ficha caben todas. */
+.articulos { list-style: none; margin: 0; padding: 0; }
+.articulos li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.articulos li:last-child { border-bottom: 0; }
+
+.articulo-thumb {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+}
+.articulo-texto { min-width: 0; flex: 1; }
+.articulo-nombre {
+  font-size: 13.5px;
+  font-weight: 540;
+  color: var(--text);
+  line-height: 1.35;
+}
+/* La variante es lo unico que distingue tres lineas que se llaman igual, asi
+   que se ve siempre, aunque sea en segundo plano. */
+.articulo-variante {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.articulo-cantidad {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-soft);
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+}

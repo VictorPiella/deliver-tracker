@@ -188,15 +188,59 @@ def _limpiar(texto: str) -> str:
     return re.sub(r"\s+", " ", texto).strip()
 
 
+# La cantidad, para guardarla en vez de tirarla: "Producto × 2" -> 2.
+CANTIDAD_VALOR_RE = re.compile(r"[x×]\s*(\d+)\s*$", re.IGNORECASE)
+# Cada fila del pedido empieza por la celda de la imagen. Partir por ahí empareja
+# título, variante e imagen DENTRO de su bloque. Recogerlos en tres listas
+# paralelas parecía más simple, pero se desalineaban en cuanto un artículo no
+# traía variante — y en el pedido real sólo tres de los cuatro la traían.
+INICIO_DE_FILA_RE = re.compile(r'order-list__image-cell', re.IGNORECASE)
+
+
+def extraer_articulos_detallados(html_body: str) -> list[dict]:
+    """Cada línea del pedido con su variante, cantidad e imagen."""
+    html_body = html_body or ""
+    cortes = [m.start() for m in INICIO_DE_FILA_RE.finditer(html_body)]
+    if not cortes:
+        # Plantilla sin celda de imagen: se parte por el propio título.
+        cortes = [m.start() for m in re.finditer(r"order-list__item-title", html_body, re.I)]
+    if not cortes:
+        return []
+
+    articulos = []
+    for i, inicio in enumerate(cortes):
+        fin = cortes[i + 1] if i + 1 < len(cortes) else len(html_body)
+        bloque = html_body[inicio:fin]
+
+        m = TODOS_LOS_TITULOS_RE.search(bloque) or TITULO_RE.search(bloque)
+        if not m:
+            continue
+        crudo = _limpiar(ETIQUETAS_RE.sub("", m.group(1)))
+        nombre = CANTIDAD_COLA_RE.sub("", crudo)
+        if not nombre:
+            continue
+
+        cantidad = CANTIDAD_VALOR_RE.search(crudo)
+        variante = VARIANTE_RE.search(bloque)
+        imagen = None
+        for patron in IMAGEN_RES:
+            mi = patron.search(bloque)
+            if mi:
+                imagen = html_mod.unescape(mi.group(1))
+                break
+
+        articulos.append({
+            "title": nombre,
+            "variant": _limpiar(ETIQUETAS_RE.sub("", variante.group(1))) if variante else None,
+            "quantity": int(cantidad.group(1)) if cantidad else None,
+            "image_url": imagen,
+        })
+    return articulos
+
+
 def extraer_articulos(html_body: str) -> list[str]:
     """Los nombres de todas las líneas del pedido, en orden y sin la cantidad."""
-    articulos = []
-    for m in TODOS_LOS_TITULOS_RE.finditer(html_body or ""):
-        crudo = ETIQUETAS_RE.sub("", m.group(1))
-        nombre = CANTIDAD_COLA_RE.sub("", _limpiar(crudo))
-        if nombre:
-            articulos.append(nombre)
-    return articulos
+    return [a["title"] for a in extraer_articulos_detallados(html_body)]
 
 
 def extraer_variantes(html_body: str) -> list[str]:
@@ -353,6 +397,7 @@ def parse(sender: str, subject: str, body_text: str, message_id: str, event_date
         # menos cosas de las que se habían comprado.
         "title_preciso": bool(titulo_real) and estado == "ordered",
         "image_url": extraer_imagen(html_body),
+        "items": extraer_articulos_detallados(html_body),
         "courier": transportista,
         "courier_tracking_number": tracking,
         "tracking_url": extraer_url_de_estado(body_text),

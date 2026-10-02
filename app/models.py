@@ -31,8 +31,33 @@ class Order(Base):
     created_at = Column(DateTime, default=utcnow)
 
     packages = relationship("Package", back_populates="order", cascade="all, delete-orphan")
+    items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan",
+                         order_by="OrderItem.posicion")
 
     __table_args__ = ()
+
+
+class OrderItem(Base):
+    """
+    Una linea del pedido: lo que de verdad se compro.
+
+    Hasta ahora solo se guardaba un titulo ("X y 3 productos mas") y los otros
+    tres se perdian al leer el email. El pedido de Shopify que destapo esto
+    traia cuatro lineas, tres de ellas el mismo producto en ediciones distintas:
+    sin la variante no habia forma de saber que eran cosas diferentes.
+    """
+    __tablename__ = "order_items"
+
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False)
+    posicion = Column(Integer, nullable=False, default=0)   # el orden del email
+    title = Column(String, nullable=False)
+    variant = Column(String)                                 # "Would You Rather Edition"
+    quantity = Column(Integer)
+    image_url = Column(String)
+    created_at = Column(DateTime, default=utcnow)
+
+    order = relationship("Order", back_populates="items")
 
 
 class Package(Base):
@@ -64,6 +89,12 @@ class Package(Base):
     # Además la sincronización sólo escribe Order.title, así que un alias nunca
     # se pisa al escanear.
     alias = Column(String)
+    # Lo que lleva ESTE envio. Antes solo existia Order.title, compartido por
+    # todos los paquetes del pedido — y un pedido de Amazon con dos productos
+    # llega en dos envios distintos, asi que el panel enseñaba dos filas con el
+    # mismo nombre y parecian duplicados. Cada email de envio dice lo que va en
+    # el suyo; eso es lo que se guarda aqui.
+    title = Column(String)
     eta = Column(String)                                # fecha estimada de entrega (texto libre del email)
     # URL de seguimiento que venia DENTRO del email, cuando no hay forma de
     # construirla. Shopify es el caso: su pagina de estado del pedido vive en
@@ -273,6 +304,8 @@ _MIGRATIONS = [
      "ALTER TABLE packages ADD COLUMN alias VARCHAR"),
     ("packages", "tracking_url",
      "ALTER TABLE packages ADD COLUMN tracking_url VARCHAR"),
+    ("packages", "title",
+     "ALTER TABLE packages ADD COLUMN title VARCHAR"),
 ]
 
 

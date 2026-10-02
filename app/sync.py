@@ -6,7 +6,7 @@ emails desordenados o duplicados no rebobinen el estado).
 """
 from datetime import datetime
 from sqlalchemy.exc import IntegrityError
-from .models import Order, Package, PackageEvent, STATUS_CANCELLED, STATUS_ORDER
+from .models import Order, OrderItem, Package, PackageEvent, STATUS_CANCELLED, STATUS_ORDER
 
 
 def status_rank(status: str) -> int:
@@ -126,6 +126,8 @@ def merge_packages(session, origen: Package, destino: Package) -> int:
         destino.eta = origen.eta
     if origen.tracking_url and not destino.tracking_url:
         destino.tracking_url = origen.tracking_url
+    if origen.title and not destino.title:
+        destino.title = origen.title
     # Y el destino suele ser el de la tienda: es el que trae nombre e imagen.
     if origen.order and destino.order:
         if origen.order.title and not destino.order.title:
@@ -216,13 +218,53 @@ def get_or_create_package(session, order: Order, source: str, external_package_i
 CAMPOS_RELLENABLES = ("courier", "courier_tracking_number", "eta", "tracking_url")
 
 
-def _rellenar_huecos(package, event: dict) -> None:
+def _rellenar_huecos(session, package, event: dict) -> None:
     """Pone los valores que el paquete no tiene todavía. No pisa nada."""
     if package is None:
         return
     for campo in CAMPOS_RELLENABLES:
         if event.get(campo) and getattr(package, campo, None) is None:
             setattr(package, campo, event[campo])
+
+    # El título NO se trata como un hueco más. Un escaneo va del email más
+    # reciente al más viejo, así que el del envío llega ANTES que el de
+    # confirmación: rellenando sin más, el envío parcial se quedaba el nombre
+    # ("y 2 productos más" en un pedido de cuatro). Aquí vale la misma regla que
+    # en el camino normal — un título preciso pisa, uno de relleno sólo rellena.
+    if event.get("title") and (not package.title or event.get("title_preciso")):
+        package.title = event["title"]
+    if package.order is not None:
+        if event.get("title") and (not package.order.title or event.get("title_preciso")):
+            package.order.title = event["title"]
+        _guardar_articulos(session, package.order, event)
+
+
+def _guardar_articulos(session, order: Order, event: dict) -> None:
+    """
+    Guarda el desglose del pedido, si el email lo trae.
+
+    Solo manda el email que habla del PEDIDO entero (el de confirmacion, el que
+    viene con title_preciso). Los de envio listan lo que va en ESE envio, que
+    puede ser una parte: el pedido real tenia cuatro lineas y su email de envio
+    solo tres. Si esos pisaran, el desglose encogeria. Aun asi se guardan cuando
+    no hay nada, que es mejor que una ficha vacia.
+    """
+    articulos = event.get("items")
+    if not articulos:
+        return
+    if order.items and not event.get("title_preciso"):
+        return
+
+    for viejo in list(order.items):
+        session.delete(viejo)
+    session.flush()
+
+    for i, a in enumerate(articulos):
+        session.add(OrderItem(
+            order_id=order.id, posicion=i, title=a["title"],
+            variant=a.get("variant"), quantity=a.get("quantity"),
+            image_url=a.get("image_url"),
+        ))
 
 
 def ingest_event(session, event: dict) -> bool:
@@ -246,7 +288,8 @@ def ingest_event(session, event: dict) -> bool:
         # sin ellas para siempre: su email ya estaba visto, así que por mucho que
         # se reescaneara nunca se volvían a mirar. Sólo se rellena lo que está a
         # None; nada que ya tenga valor se toca.
-        _rellenar_huecos(existing.package, event)
+        _rellenar_huecos(session, existing.package, event)
+        session.commit()
         return False
 
     source = event["source"]
@@ -360,8 +403,14 @@ def ingest_event(session, event: dict) -> bool:
     # del producto equivocado para siempre.
     if event.get("title") and (not order.title or event.get("title_preciso")):
         order.title = event["title"]
+    # Y el del propio envio, con la misma regla pero mirando al paquete. Es lo
+    # que hace que dos envios de un mismo pedido dejen de llamarse igual.
+    if event.get("title") and (not package.title or event.get("title_preciso")):
+        package.title = event["title"]
     if event.get("image_url") and not order.image_url:
         order.image_url = event["image_url"]
+
+    _guardar_articulos(session, order, event)
 
     try:
         session.commit()

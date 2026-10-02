@@ -168,6 +168,31 @@ Sus eventos se moverán al otro y esta entrada desaparecerá.');">
 </details>
 {% endif %}
 
+{% if package.articulos %}
+<h2 class="section-title">
+  Contenido · {{ package.articulos|length }} artículo{{ '' if package.articulos|length == 1 else 's' }}
+</h2>
+<div class="card">
+  <ul class="articulos">
+    {% for a in package.articulos %}
+    <li>
+      {% if a.image_url %}
+      <img class="articulo-thumb" src="{{ a.image_url }}" alt="" loading="lazy"
+           onerror="this.style.display='none'">
+      {% endif %}
+      <div class="articulo-texto">
+        <div class="articulo-nombre">{{ a.title }}</div>
+        {% if a.variant %}<div class="articulo-variante">{{ a.variant }}</div>{% endif %}
+      </div>
+      {% if a.quantity and a.quantity > 1 %}
+      <div class="articulo-cantidad">× {{ a.quantity }}</div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 {% if timeline %}
 <h2 class="section-title">Histórico · {{ timeline|length }} evento{{ '' if timeline|length == 1 else 's' }}</h2>
 <div class="card">
