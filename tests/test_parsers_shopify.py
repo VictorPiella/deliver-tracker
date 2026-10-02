@@ -712,3 +712,84 @@ class TestLaUrlQueVieneDentroDelEmail:
         registro = "\n".join(lineas)
         assert "shcct_" not in registro
         assert "/orders/" not in registro
+
+
+class TestUnReescaneoRellenaLoQueFaltaba:
+    """
+    Los parsers aprenden a sacar cosas nuevas con el tiempo: el transportista y
+    la URL de seguimiento de Shopify se añadieron después de que ya hubiera
+    paquetes guardados. Sin esto, esos paquetes se quedaban sin ellas para
+    siempre — su email ya estaba visto, así que por mucho que se reescaneara
+    nunca se volvía a mirar.
+    """
+
+    BASE = {"source": "shopify", "order_id": "mitienda.com#10239",
+            "package_id": "mitienda.com#10239", "status": "shipped",
+            "status_label_raw": "x", "title": "Cosa", "image_url": None,
+            "message_id": "m1"}
+
+    def test_rellena_el_transportista_que_antes_no_se_sacaba(self, db_path):
+        from app.models import Package, get_session
+        from app.sync import ingest_event
+
+        s = get_session(db_path)
+        # Como se guardó entonces: sin transportista.
+        ingest_event(s, {**self.BASE, "event_date": FECHA})
+        assert s.query(Package).one().courier is None
+
+        # Mismo email, reescaneado con el parser de ahora.
+        creado = ingest_event(s, {**self.BASE, "event_date": FECHA,
+                                  "courier": "yunexpress",
+                                  "courier_tracking_number": "YT2626900701670433"})
+        assert creado is False                       # no se duplica el evento
+        p = s.query(Package).one()
+        assert p.courier == "yunexpress"             # pero sí se rellena
+        assert p.courier_tracking_number == "YT2626900701670433"
+        s.close()
+
+    def test_rellena_la_url_de_seguimiento(self, db_path):
+        from app.models import Package, get_session
+        from app.sync import ingest_event
+
+        s = get_session(db_path)
+        ingest_event(s, {**self.BASE, "event_date": FECHA})
+        ingest_event(s, {**self.BASE, "event_date": FECHA,
+                         "tracking_url": "https://mitienda.com/1/orders/abc/authenticate?key=k"})
+        assert s.query(Package).one().tracking_url.endswith("key=k")
+        s.close()
+
+    def test_no_pisa_lo_que_ya_tenia(self, db_path):
+        """Rellenar huecos, no reescribir. Un reescaneo no debe cambiar datos buenos."""
+        from app.models import Package, get_session
+        from app.sync import ingest_event
+
+        s = get_session(db_path)
+        ingest_event(s, {**self.BASE, "event_date": FECHA, "courier": "correos"})
+        ingest_event(s, {**self.BASE, "event_date": FECHA, "courier": "yunexpress"})
+        assert s.query(Package).one().courier == "correos"
+        s.close()
+
+    def test_no_crea_eventos_de_mas(self, db_path):
+        from app.models import PackageEvent, get_session
+        from app.sync import ingest_event
+
+        s = get_session(db_path)
+        ingest_event(s, {**self.BASE, "event_date": FECHA})
+        for _ in range(3):
+            ingest_event(s, {**self.BASE, "event_date": FECHA, "courier": "yunexpress"})
+        assert s.query(PackageEvent).count() == 1
+        s.close()
+
+    def test_el_estado_no_se_toca_por_aqui(self, db_path):
+        """
+        El estado lo decide apply_status, con sus reglas de avance y de estado
+        manual. Rellenar huecos no es la puerta de atrás para cambiarlo.
+        """
+        from app.models import Package, get_session
+        from app.sync import ingest_event
+
+        s = get_session(db_path)
+        ingest_event(s, {**self.BASE, "event_date": FECHA})
+        ingest_event(s, {**self.BASE, "event_date": FECHA, "status": "delivered"})
+        assert s.query(Package).one().status == "shipped"
+        s.close()

@@ -210,6 +210,21 @@ def get_or_create_package(session, order: Order, source: str, external_package_i
     return package
 
 
+# Campos que un reescaneo puede rellenar si estaban vacíos. El estado no está
+# aquí a propósito: eso lo decide apply_status, con sus reglas de avance y de
+# estado manual.
+CAMPOS_RELLENABLES = ("courier", "courier_tracking_number", "eta", "tracking_url")
+
+
+def _rellenar_huecos(package, event: dict) -> None:
+    """Pone los valores que el paquete no tiene todavía. No pisa nada."""
+    if package is None:
+        return
+    for campo in CAMPOS_RELLENABLES:
+        if event.get(campo) and getattr(package, campo, None) is None:
+            setattr(package, campo, event[campo])
+
+
 def ingest_event(session, event: dict) -> bool:
     """
     Procesa un evento normalizado (salida de los parsers) y lo persiste.
@@ -222,6 +237,16 @@ def ingest_event(session, event: dict) -> bool:
         .first()
     )
     if existing is not None:
+        # Mismo email ya procesado: no se crea otro evento. Pero sí se rellenan
+        # los campos que estuvieran vacíos.
+        #
+        # Hace falta porque los parsers aprenden a sacar cosas nuevas con el
+        # tiempo (el transportista y la URL de seguimiento de Shopify se
+        # añadieron después), y sin esto los paquetes ya guardados se quedaban
+        # sin ellas para siempre: su email ya estaba visto, así que por mucho que
+        # se reescaneara nunca se volvían a mirar. Sólo se rellena lo que está a
+        # None; nada que ya tenga valor se toca.
+        _rellenar_huecos(existing.package, event)
         return False
 
     source = event["source"]
