@@ -120,12 +120,34 @@ class TestLeerLaRespuesta:
 
 
 class TestTraducirLosEstados:
+    def test_la_fase_pone_el_suelo_y_el_texto_afina_hacia_arriba(self):
+        """
+        El panel no puede contradecir a Correos. "Alta en la unidad de reparto"
+        suena a centro de distribución y así se traducía, pero Correos mete ese
+        evento en la fase 3 y en su web lo enseña como "EN ENTREGA": quien
+        miraba las dos pantallas veía dos cosas distintas.
+
+        La fase sola tampoco vale: dentro de "EN CAMINO" caben la admisión y el
+        centro logístico, que no son lo mismo.
+        """
+        # El texto dice menos que la fase -> manda la fase.
+        assert estado_del_evento(
+            {"summaryText": "Alta en la unidad de reparto", "phase": "3"}) == "out_for_delivery"
+        # El texto dice más que la fase -> manda el texto.
+        assert estado_del_evento(
+            {"summaryText": "Clasificado en Centro Logístico", "phase": "2"}) == "at_distribution"
+        assert estado_del_evento({"summaryText": "Entregado", "phase": "2"}) == "delivered"
+
+    def test_sin_fase_el_texto_decide_solo(self):
+        assert estado_del_evento(
+            {"summaryText": "Alta en la unidad de reparto", "phase": ""}) == "at_distribution"
+
     def test_los_textos_reales(self):
         casos = [
             ("Prerregistrado", "ordered"),
             ("Admitido.", "shipped"),
             ("Clasificado", "at_distribution"),
-            ("Alta en la unidad de reparto", "at_distribution"),
+            ("Alta en la unidad de reparto", "at_distribution"),   # sin fase
             ("En reparto", "out_for_delivery"),
             ("Entregado", "delivered"),
         ]
@@ -201,7 +223,7 @@ class TestLoQueLlegaAlPaquete:
         paquete_de_correos(db_path)
         s = get_session(db_path)
         resumen = actualizar_desde_correos(s, log=lambda *a: None)
-        assert resumen == {"consultados": 1, "eventos": 3, "fallos": 0}
+        assert resumen == {"consultados": 1, "eventos": 3, "fallos": 0, "descubiertos": 0}
         assert s.query(PackageEvent).count() == 4      # el del email + los 3
         s.close()
 
@@ -209,7 +231,9 @@ class TestLoQueLlegaAlPaquete:
         paquete_de_correos(db_path)
         s = get_session(db_path)
         actualizar_desde_correos(s, log=lambda *a: None)
-        assert s.query(Package).one().status == "at_distribution"
+        # "Alta en la unidad de reparto" va en la fase 3, que Correos llama
+        # "EN ENTREGA" en su web. Ver TestLaFasePoneElSuelo.
+        assert s.query(Package).one().status == "out_for_delivery"
         s.close()
 
     def test_preguntar_dos_veces_no_duplica_nada(self, db_path, correos_responde):
@@ -345,4 +369,63 @@ class TestLosTestsNoHablanConCorreos:
         paquete_de_correos(db_path)
         s = get_session(db_path)
         assert actualizar_desde_correos(s, log=lambda *a: None)["consultados"] == 0
+        s.close()
+
+
+class TestDescubrirQuienLoReparte:
+    """
+    Casi ningún paquete viene con "Correos" escrito. El que destapó todo esto es
+    un AliExpress con courier a None, y su número lo sigue Correos sin problema:
+    ningún email lo dice.
+    """
+
+    def paquete_sin_transportista(self, db_path):
+        s = get_session(db_path)
+        ingest_event(s, {"source": "aliexpress", "order_id": "307", "package_id": NUMERO,
+                         "status": "in_country", "status_label_raw": "x", "title": "Algo",
+                         "image_url": None, "message_id": "m1", "event_date": EVENT_DATE})
+        s.close()
+
+    def test_se_le_pregunta_aunque_no_sepamos_quien_lo_lleva(self, db_path):
+        self.paquete_sin_transportista(db_path)
+        s = get_session(db_path)
+        assert [n for _, n in paquetes_a_consultar(s)] == [NUMERO]
+        s.close()
+
+    def test_si_correos_contesta_queda_apuntado(self, db_path, correos_responde):
+        self.paquete_sin_transportista(db_path)
+        s = get_session(db_path)
+        resumen = actualizar_desde_correos(s, log=lambda *a: None)
+        assert resumen["descubiertos"] == 1
+        assert s.query(Package).one().courier == "correos"
+        s.close()
+
+    def test_si_no_contesta_nada_no_se_le_inventa_un_transportista(self, db_path, monkeypatch):
+        """Una lista vacía quiere decir "no es mío", no "es mío y está parado"."""
+        self.paquete_sin_transportista(db_path)
+        monkeypatch.setattr(correos_api, "HABILITADO", True)
+        monkeypatch.setattr(correos_api, "_pedir", lambda n: {"shipment": []})
+        s = get_session(db_path)
+        actualizar_desde_correos(s, log=lambda *a: None)
+        assert s.query(Package).one().courier is None
+        s.close()
+
+    def test_no_se_pisa_un_transportista_que_ya_sabiamos(self, db_path, correos_responde):
+        s = get_session(db_path)
+        ingest_event(s, {"source": "amazon", "order_id": "408-1", "package_id": "P1",
+                         "status": "shipped", "status_label_raw": "x", "title": "x",
+                         "image_url": None, "message_id": "m1", "event_date": EVENT_DATE,
+                         "courier": "gls", "courier_tracking_number": NUMERO})
+        s.close()
+        s = get_session(db_path)
+        actualizar_desde_correos(s, log=lambda *a: None)
+        assert s.query(Package).one().courier == "gls"
+        s.close()
+
+    def test_los_seguros_se_consultan_antes_que_las_apuestas(self, db_path):
+        """Con el tope por escaneo, el orden decide quién se queda fuera."""
+        self.paquete_sin_transportista(db_path)
+        paquete_de_correos(db_path, numero="PX9999999999999999999Z")
+        s = get_session(db_path)
+        assert [n for _, n in paquetes_a_consultar(s)][0] == "PX9999999999999999999Z"
         s.close()

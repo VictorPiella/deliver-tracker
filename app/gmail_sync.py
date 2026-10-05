@@ -38,7 +38,7 @@ from .models import (
 )
 from .timeutils import utcnow, to_utc_naive
 from .sync import (actualizar_desde_correos, evento_anclable, evento_ya_visto,
-                   ingest_event, ingest_carrier_event)
+                   fusionar_duplicados_por_numero, ingest_event, ingest_carrier_event)
 from .parsers import amazon, aliexpress, gls, correos, shopify
 
 # --- Configuración ---
@@ -261,13 +261,30 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
             continue
 
         if correos.matches(sender):
-            # Correos no trae ningún ID de Amazon/AliExpress: se trackea como
-            # entrada independiente (source='correos'), igual que Amazon/AliExpress.
             event_date = parse_event_date(date_str)
             parsed = correos.parse(sender, subject, plaintext_body or "", message_id, event_date, html_body=html_body or "")
             if parsed is None:
                 record_unparsed(session, message_id, sender, subject, event_date)
                 unparsed += 1
+                continue
+
+            # Primero se intenta colgar de un paquete que ya sigamos, igual que
+            # con GLS. Correos reparte, no vende.
+            #
+            # Se decía aquí que Correos "no trae ningún ID compartido", y por eso
+            # siempre creaba entrada aparte. No es verdad siempre: un paquete de
+            # AliExpress puede venir identificado por el mismo número que usa
+            # Correos, y entonces el mismo envío salía DOS veces en el panel —
+            # uno con el nombre del producto y otro con un código de ruta de
+            # título. Pasó con PHBW6T98...J.
+            if ingest_carrier_event(session, {**parsed,
+                                              "tracking_number": parsed.get("courier_tracking_number")},
+                                    courier="correos"):
+                ingested += 1
+                log(f"[gmail_sync] + correos {parsed['status']:<16} (sobre paquete existente) {subject[:34]}")
+                continue
+            if evento_ya_visto(session, message_id):
+                duplicated += 1
                 continue
             created = ingest_event(session, parsed)
             if created:
@@ -327,12 +344,22 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
             else:
                 duplicated += 1
 
+    # Un mismo envío puede haber entrado dos veces (la entrada de la tienda y la
+    # del transportista). Si comparten número de seguimiento son el mismo, y se
+    # juntan antes de preguntarle nada a Correos: así no se gastan dos consultas
+    # en el mismo paquete.
+    fusionados = 0
+    try:
+        fusionados = fusionar_duplicados_por_numero(session, log=log)
+    except Exception as e:  # noqa: BLE001
+        log(f"[sync] Fusión por número omitida: {type(e).__name__}: {e}")
+
     # Ya con los emails leídos, se le pregunta a Correos por los envíos que
     # siguen en movimiento. Va aquí, al final y en su propio try, por una razón:
     # es lo único que depende de que internet responda, y no puede llevarse por
     # delante un escaneo de emails que ya ha salido bien. Si falla, el panel se
     # queda con lo que digan los emails, que es como estaba antes.
-    correos_resumen = {"consultados": 0, "eventos": 0, "fallos": 0}
+    correos_resumen = {"consultados": 0, "eventos": 0, "fallos": 0, "descubiertos": 0}
     try:
         correos_resumen = actualizar_desde_correos(session, log=log)
     except Exception as e:  # noqa: BLE001 - da igual qué falle, no debe cortar el escaneo
@@ -346,6 +373,7 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
     session.close()
 
     summary = {
+        "fusionados": fusionados,
         "correos_consultados": correos_resumen["consultados"],
         "correos_eventos": correos_resumen["eventos"],
         "correos_fallos": correos_resumen["fallos"],

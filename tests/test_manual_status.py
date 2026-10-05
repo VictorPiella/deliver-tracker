@@ -6,6 +6,7 @@ siguen guardando en el histórico pero NO cambian el estado. Si no fuera así,
 marcar algo como entregado porque lo tienes en la mano duraría hasta el
 siguiente escaneo.
 """
+import re
 from app.models import Package, PackageEvent
 from app.sync import (
     apply_status, ingest_carrier_event, ingest_event, recompute_status_from_events,
@@ -179,7 +180,9 @@ class TestControlesEnElPanel:
 
         assert html.count('name="status"') == n
         assert html.count("/status") >= n
-        assert html.count("/delete") == n
+        # Se cuentan las rutas por paquete, no "/delete" a secas: el panel tiene
+        # además un formulario de borrado múltiple que apunta a /packages/delete.
+        assert len(re.findall(r"/package/\d+/delete", html)) == n
         # El desplegable lista los 10 estados normalizados por fila.
         assert html.count('value="delivered"') == n
 

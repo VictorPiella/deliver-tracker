@@ -65,7 +65,7 @@
 
 <div class="list" id="lista">
 {% for p in packages %}
-<article class="pkg"
+<article class="pkg" data-id="{{ p.id }}"
          data-delivered="{{ 'si' if p.status in ('delivered', 'cancelled') else 'no' }}"
          data-search="{{ ((p.title or '') ~ ' ' ~ (p.titulo_email or '') ~ ' ' ~ (p.external_package_id or '') ~ ' ' ~ (p.courier_tracking_number or '') ~ ' ' ~ p.source)|lower }}">
 
@@ -311,6 +311,165 @@
 
     buscador.addEventListener('input', aplicar);
   })();
+</script>
+
+<form id="form-borrado-multiple" method="post"
+      action="{{ url_for('delete_packages_route') }}" style="display:none">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="ids" id="ids-a-borrar">
+</form>
+
+<div id="barra-seleccion" class="barra-seleccion" hidden>
+  <span id="cuenta-seleccion"></span>
+  <button type="button" class="btn btn-ghost" data-accion="limpiar">Quitar selección</button>
+  <button type="button" class="btn btn-peligro" data-accion="borrar">
+    Mover a la papelera
+  </button>
+  <span class="barra-seleccion-pista">o pulsa <kbd>Supr</kbd></span>
+</div>
+
+<div id="goma" class="goma" hidden></div>
+
+<script>
+(function () {
+  // Seleccionar arrastrando, como en el escritorio, y borrar con Supr.
+  //
+  // El borrado va a la papelera, igual que el botón de cada fila: seleccionar
+  // quince paquetes y darles a Supr no debería ser más definitivo que borrarlos
+  // de uno en uno. Por eso no se pregunta por uno, pero sí a partir de unos
+  // cuantos — un arrastre largo sin querer se nota mucho menos que un clic.
+  const CONFIRMAR_A_PARTIR_DE = 3;
+
+  const lista = document.getElementById('lista');
+  const goma = document.getElementById('goma');
+  const barra = document.getElementById('barra-seleccion');
+  const cuenta = document.getElementById('cuenta-seleccion');
+  const formulario = document.getElementById('form-borrado-multiple');
+  const campoIds = document.getElementById('ids-a-borrar');
+  if (!lista || !goma || !barra) return;
+
+  const seleccion = new Set();
+  let arrastrando = false, origenX = 0, origenY = 0, huboArrastre = false;
+
+  const filas = () => Array.from(lista.querySelectorAll('.pkg'))
+                           .filter(f => f.style.display !== 'none');
+
+  function pintar() {
+    lista.querySelectorAll('.pkg').forEach(f => {
+      f.classList.toggle('pkg-seleccionado', seleccion.has(f.dataset.id));
+    });
+    const n = seleccion.size;
+    barra.hidden = n === 0;
+    if (n) cuenta.textContent = n + (n === 1 ? ' paquete seleccionado' : ' paquetes seleccionados');
+  }
+
+  function limpiar() { seleccion.clear(); pintar(); }
+
+  function borrar() {
+    if (!seleccion.size) return;
+    const n = seleccion.size;
+    if (n >= CONFIRMAR_A_PARTIR_DE &&
+        !confirm('¿Mover ' + n + ' paquetes a la papelera?
+
+Podrás recuperarlos desde la papelera.')) {
+      return;
+    }
+    campoIds.value = Array.from(seleccion).join(',');
+    formulario.submit();
+  }
+
+  // --- clic normal: alternar, con Ctrl/Cmd para ir sumando ---
+  lista.addEventListener('click', (e) => {
+    // Un clic en un enlace, un botón o un campo es lo que parece: no selecciona.
+    if (e.target.closest('a, button, input, select, textarea, details')) return;
+    const fila = e.target.closest('.pkg');
+    if (!fila) return;
+    if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      const estaba = seleccion.has(fila.dataset.id);
+      seleccion.clear();
+      if (!estaba) seleccion.add(fila.dataset.id);
+    } else {
+      seleccion.has(fila.dataset.id) ? seleccion.delete(fila.dataset.id)
+                                     : seleccion.add(fila.dataset.id);
+    }
+    pintar();
+  });
+
+  // --- arrastrar para seleccionar ---
+  lista.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('a, button, input, select, textarea, details')) return;
+    arrastrando = true;
+    huboArrastre = false;
+    origenX = e.pageX;
+    origenY = e.pageY;
+    if (!e.ctrlKey && !e.metaKey) seleccion.clear();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!arrastrando) return;
+    const ancho = Math.abs(e.pageX - origenX);
+    const alto = Math.abs(e.pageY - origenY);
+    // Unos pocos píxeles de margen: si no, cualquier temblor al hacer clic se
+    // interpretaría como un arrastre y la selección parecería tener vida propia.
+    if (!huboArrastre && ancho < 5 && alto < 5) return;
+    huboArrastre = true;
+    e.preventDefault();
+
+    Object.assign(goma.style, {
+      left: Math.min(origenX, e.pageX) + 'px',
+      top: Math.min(origenY, e.pageY) + 'px',
+      width: ancho + 'px',
+      height: alto + 'px',
+    });
+    goma.hidden = false;
+
+    const caja = goma.getBoundingClientRect();
+    filas().forEach(fila => {
+      const r = fila.getBoundingClientRect();
+      const toca = !(r.right < caja.left || r.left > caja.right ||
+                     r.bottom < caja.top || r.top > caja.bottom);
+      if (toca) seleccion.add(fila.dataset.id);
+    });
+    pintar();
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!arrastrando) return;
+    arrastrando = false;
+    goma.hidden = true;
+    // Si hubo arrastre, el 'click' que viene detrás no debe deshacer lo
+    // seleccionado: se traga una vez.
+    if (huboArrastre) {
+      lista.addEventListener('click', (e) => e.stopImmediatePropagation(),
+                             { capture: true, once: true });
+    }
+  });
+
+  // --- teclado ---
+  document.addEventListener('keydown', (e) => {
+    // Si estás escribiendo (el buscador, un nombre), las teclas son para el texto.
+    const escribiendo = e.target.matches('input, textarea, select');
+    if (e.key === 'Escape' && !escribiendo) return limpiar();
+    if (escribiendo) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (!seleccion.size) return;
+      e.preventDefault();
+      borrar();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      filas().forEach(f => seleccion.add(f.dataset.id));
+      pintar();
+    }
+  });
+
+  barra.addEventListener('click', (e) => {
+    const accion = e.target.dataset.accion;
+    if (accion === 'limpiar') limpiar();
+    if (accion === 'borrar') borrar();
+  });
+})();
 </script>
 
 {% endblock %}

@@ -14,6 +14,7 @@ importar el módulo. Dos motivos:
   worker desactivado, sin depender de variables de entorno globales.
 """
 import os
+import re
 import secrets
 
 from flask import (
@@ -172,6 +173,38 @@ def _instalar_csrf(app: Flask) -> None:
         return {"csrf_token": session["csrf_token"]}
 
 
+# Códigos de ruta que Correos mete donde debería ir el remitente ("COE-AE",
+# "BCN8"). Son un nombre peor que ninguno: no dicen nada y ocupan el sitio.
+_TITULO_INUTIL_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{0,7}$")
+
+
+def nombre_visible(package) -> str:
+    """
+    Cómo llamar a un paquete en el panel, de mejor a peor:
+
+      1. El alias que le hayas puesto tú.
+      2. El nombre del envío, si el email traía uno de verdad.
+      3. El del pedido.
+      4. Su número de seguimiento.
+
+    El 4 existe porque a veces no sabemos qué hay dentro y no pasa nada: hay
+    envíos cuyos emails no nombran el producto (AliExpress en inglés no lo
+    hace). Antes esos salían con el código de ruta de Correos de título, o en
+    blanco. Y un paquete que no sabes qué es tiene que verse IGUAL: para eso
+    está el panel, y para eso tienes el lápiz al lado para ponerle nombre.
+    """
+    if package.alias:
+        return package.alias
+    for candidato in (package.title,
+                      package.order.title if package.order else None):
+        if candidato and not _TITULO_INUTIL_RE.match(candidato.strip()):
+            return candidato
+    numero = package.courier_tracking_number or package.external_package_id
+    if numero:
+        return f"Envío {numero}"
+    return "Paquete sin identificar"
+
+
 def create_app(db_path: str | None = None, use_mock_gmail: bool | None = None,
                enable_worker: bool | None = None) -> Flask:
     app = Flask(__name__)
@@ -256,7 +289,7 @@ def register_routes(app: Flask) -> None:
             "id": p.id,
             "source": p.source,
             "external_package_id": p.external_package_id,
-            "title": p.alias or p.title or (p.order.title if p.order else None),
+            "title": nombre_visible(p),
             "alias": p.alias,
             "titulo_email": p.title or (p.order.title if p.order else None),
             "image_url": p.order.image_url if p.order else None,
@@ -333,7 +366,7 @@ def register_routes(app: Flask) -> None:
             "id": p.id,
             "source": p.source,
             "external_package_id": p.external_package_id,
-            "title": p.alias or p.title or (p.order.title if p.order else None),
+            "title": nombre_visible(p),
             "alias": p.alias,
             "titulo_email": p.title or (p.order.title if p.order else None),
             "image_url": p.order.image_url if p.order else None,
@@ -403,7 +436,7 @@ def register_routes(app: Flask) -> None:
             "id": p.id,
             "source": p.source,
             "external_package_id": p.external_package_id,
-            "title": p.alias or p.title or (p.order.title if p.order else None),
+            "title": nombre_visible(p),
             "alias": p.alias,
             "status": p.status,
             "status_label": STATUS_LABELS_ES.get(p.status, p.status),
@@ -438,6 +471,40 @@ def register_routes(app: Flask) -> None:
         flash("Paquete movido a la papelera.", "success", )
         return redirect(url_for("index"))
 
+    @app.route("/packages/delete", methods=["POST"])
+    def delete_packages_route():
+        """
+        Manda a la papelera varios paquetes de una vez.
+
+        Es la misma operación de siempre repetida, no un borrado distinto: van a
+        la papelera igual, y se recuperan igual. Seleccionar quince paquetes y
+        darles a Supr no debería ser más definitivo que borrarlos de uno en uno.
+        """
+        ids = []
+        for crudo in request.form.getlist("ids"):
+            for trozo in str(crudo).split(","):
+                trozo = trozo.strip()
+                if trozo.isdigit():
+                    ids.append(int(trozo))
+
+        borrados = 0
+        for package_id in dict.fromkeys(ids):          # sin repetidos, en orden
+            p = g.db.get(Package, package_id)
+            if p is None or p.deleted_at is not None:
+                continue
+            soft_delete_package(g.db, p,
+                                motivo=f"seleccion multiple del panel desde {request.remote_addr}")
+            unpublish_package(package_id)
+            borrados += 1
+        g.db.commit()
+
+        if borrados:
+            flash(f"{borrados} paquete{'' if borrados == 1 else 's'} a la papelera.",
+                  "success")
+        else:
+            flash("No se ha movido nada a la papelera.", "info")
+        return redirect(url_for("index"))
+
     @app.route("/papelera")
     def papelera():
         borrados = (
@@ -450,7 +517,7 @@ def register_routes(app: Flask) -> None:
             "id": p.id,
             "source": p.source,
             "external_package_id": p.external_package_id,
-            "title": p.alias or p.title or (p.order.title if p.order else None),
+            "title": nombre_visible(p),
             "image_url": p.order.image_url if p.order else None,
             "status": p.status,
             "status_label": STATUS_LABELS_ES.get(p.status, p.status),

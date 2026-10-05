@@ -4,6 +4,7 @@ persiste en la base de datos, creando Order/Package si no existen y actualizando
 el estado del Package solo si el nuevo evento supone un AVANCE real (para que
 emails desordenados o duplicados no rebobinen el estado).
 """
+import re
 from datetime import datetime
 from sqlalchemy.exc import IntegrityError
 from .models import (Order, OrderItem, Package, PackageEvent, STATUS_CANCELLED,
@@ -127,7 +128,10 @@ def merge_packages(session, origen: Package, destino: Package) -> int:
         destino.eta = origen.eta
     if origen.tracking_url and not destino.tracking_url:
         destino.tracking_url = origen.tracking_url
-    if origen.title and not destino.title:
+    # Un título inútil ("COE-AE", un código de ruta de Correos) no es mejor que
+    # ninguno: si se copiara, el paquete pasaría a llamarse así para siempre y
+    # ya no habría forma de enseñar algo mejor en su lugar.
+    if origen.title and not destino.title and _titulo_util(origen):
         destino.title = origen.title
     # Y el destino suele ser el de la tienda: es el que trae nombre e imagen.
     if origen.order and destino.order:
@@ -489,7 +493,19 @@ def ingest_tracking_event(session, package: Package, evento: dict) -> bool:
     Los ids de Correos van marcados con el prefijo "correos:" para que se
     distingan de un vistazo en la base.
     """
-    if session.query(PackageEvent).filter_by(gmail_message_id=evento["id"]).first():
+    ya_estaba = session.query(PackageEvent).filter_by(gmail_message_id=evento["id"]).first()
+    if ya_estaba is not None:
+        # El evento ya está, pero puede que lo tradujéramos mal entonces. Pasó
+        # con "Alta en la unidad de reparto", que se guardó como centro de
+        # distribución antes de saber que Correos lo llama "EN ENTREGA": los
+        # eventos guardados se quedaban con la traducción vieja para siempre,
+        # porque al estar deduplicados no se volvían a mirar.
+        if ya_estaba.status != evento["estado"]:
+            ya_estaba.status = evento["estado"]
+            if apply_status(package, evento["estado"]):
+                package.status_label_raw = evento["texto"]
+                package.last_updated = evento["fecha"]
+            return True
         return False
 
     session.add(PackageEvent(
@@ -515,12 +531,22 @@ def ingest_tracking_event(session, package: Package, evento: dict) -> bool:
 
 def paquetes_a_consultar(session) -> list:
     """
-    Los que vale la pena preguntarle a Correos: los que llevan un número suyo y
-    todavía se pueden mover.
+    Los que vale la pena preguntarle a Correos, los seguros primero.
 
     Se dejan fuera los entregados y los cancelados — ya no van a cambiar — y los
-    de la papelera, que para eso se borraron. Preguntar por ellos sería gastar
-    llamadas en una API que no es nuestra.
+    de la papelera, que para eso se borraron.
+
+    Lo que no es evidente: casi ninguno viene con "Correos" escrito. El paquete
+    que destapó todo esto es un AliExpress con courier a None, y sin embargo su
+    número es de Correos y su web lo sigue perfectamente. Nadie en el email dice
+    quién lo reparte.
+
+    Así que hay dos grupos. Primero los que ya sabemos que son de Correos.
+    Después los que no tienen transportista conocido y llevan un número con
+    pinta: de esos no sabemos nada hasta preguntar, y preguntar es barato —
+    Correos devuelve una lista vacía si el número no es suyo. Cuando contesta
+    con eventos se le apunta el courier al paquete, y a partir de ahí ya está en
+    el primer grupo y deja de ser una apuesta.
     """
     from .correos_api import numero_plausible
 
@@ -530,15 +556,17 @@ def paquetes_a_consultar(session) -> list:
         .filter(~Package.status.in_(tuple(STATUS_FINALES)))
         .all()
     )
-    salida = []
+    seguros, posibles = [], []
     for p in candidatos:
-        es_de_correos = "correos" in ((p.courier or "") + " " + (p.source or "")).lower()
-        if not es_de_correos:
+        numero = (p.courier_tracking_number or p.external_package_id or "").strip()
+        if not numero_plausible(numero):
             continue
-        numero = p.courier_tracking_number or p.external_package_id
-        if numero_plausible(numero):
-            salida.append((p, numero.strip()))
-    return salida
+        quien = ((p.courier or "") + " " + (p.source or "")).lower()
+        if "correos" in quien:
+            seguros.append((p, numero))
+        elif not p.courier:
+            posibles.append((p, numero))
+    return seguros + posibles
 
 
 def actualizar_desde_correos(session, log=print) -> dict:
@@ -552,7 +580,7 @@ def actualizar_desde_correos(session, log=print) -> dict:
     """
     from .correos_api import HABILITADO, MAX_CONSULTAS, CorreosNoContesta, consultar
 
-    resumen = {"consultados": 0, "eventos": 0, "fallos": 0}
+    resumen = {"consultados": 0, "eventos": 0, "fallos": 0, "descubiertos": 0}
     if not HABILITADO:
         return resumen
 
@@ -565,11 +593,105 @@ def actualizar_desde_correos(session, log=print) -> dict:
             log(f"[correos] {numero}: no se ha podido preguntar ({e})")
             continue
 
+        if not eventos:
+            # Correos no sabe nada de este número: no es suyo, o todavía no lo
+            # tiene. No es un fallo y no hay nada que apuntar.
+            continue
+
+        # Ha contestado, así que el número SÍ es suyo. Queda anotado para que la
+        # próxima vez no sea una apuesta, y para que el panel pueda decir quién
+        # lo lleva.
+        if not package.courier:
+            # "Descubierto" sólo cuando era una apuesta de verdad. Si la fuente
+            # ya era Correos no se ha averiguado nada: se está rellenando un
+            # campo que faltaba.
+            era_una_apuesta = "correos" not in (package.source or "").lower()
+            package.courier = "correos"
+            if era_una_apuesta:
+                resumen["descubiertos"] += 1
+                log(f"[correos] {numero}: lo reparte Correos (no lo decía ningún email)")
+
         nuevos = sum(1 for ev in eventos if ingest_tracking_event(session, package, ev))
         if nuevos:
             resumen["eventos"] += nuevos
             log(f"[correos] + {nuevos} evento(s) {numero} -> {package.status}")
 
-    if resumen["eventos"] or resumen["fallos"]:
+    if resumen["eventos"] or resumen["fallos"] or resumen["descubiertos"]:
         session.commit()
     return resumen
+
+
+# ---------------------------------------------------------------------------
+# Juntar lo que es el mismo envío
+# ---------------------------------------------------------------------------
+
+# Títulos que no dicen nada: códigos de ruta que Correos mete donde debería ir
+# el remitente ("COE-AE", "BCN8"). Un paquete con un nombre así pierde contra
+# cualquiera que traiga el del producto.
+TITULO_INUTIL_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{0,7}$")
+
+
+def _titulo_util(package: Package) -> bool:
+    titulo = (package.title or (package.order.title if package.order else None) or "").strip()
+    return bool(titulo) and not TITULO_INUTIL_RE.match(titulo)
+
+
+def _numeros_de(package: Package) -> set:
+    return {n.strip() for n in (package.external_package_id, package.courier_tracking_number)
+            if n and n.strip()}
+
+
+def _mejor_destino(grupo: list) -> Package:
+    """
+    Cuál de los dos sobrevive. Gana el que más cosas sepa: primero el que tiene
+    un nombre de verdad (el de la tienda, no un código de ruta), luego el que
+    más eventos acumula, y a igualdad el más antiguo — que es el que lleva más
+    tiempo en el panel y el que probablemente tengas abierto.
+    """
+    return max(grupo, key=lambda p: (_titulo_util(p), len(p.events), -p.id))
+
+
+def fusionar_duplicados_por_numero(session, log=print) -> int:
+    """
+    Junta los paquetes que comparten número de seguimiento.
+
+    Un mismo envío podía salir dos veces: la entrada de la tienda y la del
+    transportista. Hasta ahora unirlas era cosa tuya, con el botón "Fusionar",
+    porque enlazarlas a ciegas era adivinar.
+
+    Pero por NÚMERO no se adivina nada: un número de seguimiento identifica un
+    envío, y si dos filas llevan el mismo es que son el mismo. Lo que sí sería
+    adivinar es juntarlos por parecido de título o de fecha, y eso se sigue sin
+    hacer.
+
+    Los de la papelera se quedan fuera: si borraste uno, no quieres que vuelva
+    por la puerta de atrás metido dentro de otro.
+    """
+    vivos = session.query(Package).filter(Package.deleted_at.is_(None)).all()
+
+    por_numero = {}
+    for p in vivos:
+        for numero in _numeros_de(p):
+            por_numero.setdefault(numero, []).append(p)
+
+    # Un paquete puede aparecer en dos grupos (su id y su nº de seguimiento).
+    # Se lleva la cuenta de lo ya fundido para no intentarlo dos veces.
+    fundidos = set()
+    total = 0
+    for numero, grupo in por_numero.items():
+        grupo = [p for p in grupo if p.id not in fundidos]
+        if len(grupo) < 2:
+            continue
+
+        destino = _mejor_destino(grupo)
+        for origen in grupo:
+            if origen.id == destino.id:
+                continue
+            merge_packages(session, origen, destino)
+            fundidos.add(origen.id)
+            total += 1
+            log(f"[sync] Fusionados por nº {numero}: #{origen.id} -> #{destino.id}")
+
+    if total:
+        session.commit()
+    return total

@@ -94,11 +94,40 @@ FASE_A_ESTADO = {
 
 
 def estado_del_evento(evento: dict) -> str:
+    """
+    Traduce un evento de Correos a uno de nuestros estados.
+
+    Se miran los dos, texto y fase, y gana el que vaya MÁS AVANZADO. No es un
+    capricho: la fase es lo que Correos le enseña al usuario en su web, y el
+    panel no puede contradecir a la fuente que está citando.
+
+    El caso que lo destapó: "Alta en la unidad de reparto" suena a centro de
+    distribución, y por el texto se traducía así — pero Correos mete ese evento
+    en la fase 3, que en su web se lee "EN ENTREGA". Quien miraba las dos
+    pantallas veía una diciendo "En centro de distribución" y la otra "EN
+    ENTREGA".
+
+    El texto sigue haciendo falta, y por eso no se usa sólo la fase: dentro de
+    "EN CAMINO" caben la admisión y el centro logístico, que no son lo mismo. El
+    texto afina hacia arriba; la fase pone el suelo.
+    """
+    from .models import STATUS_ORDER
+
+    def rango(estado):
+        try:
+            return STATUS_ORDER.index(estado)
+        except ValueError:
+            return -1
+
     texto = " ".join(str(evento.get(c) or "") for c in ("summaryText", "extendedText"))
+    por_texto = "unknown"
     for patron, estado in TEXTO_A_ESTADO:
         if patron.search(texto):
-            return estado
-    return FASE_A_ESTADO.get(str(evento.get("phase") or "").strip(), "unknown")
+            por_texto = estado
+            break
+
+    por_fase = FASE_A_ESTADO.get(str(evento.get("phase") or "").strip(), "unknown")
+    return por_texto if rango(por_texto) >= rango(por_fase) else por_fase
 
 
 def _fecha_del_evento(evento: dict):

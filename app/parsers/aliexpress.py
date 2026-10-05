@@ -36,7 +36,8 @@ STATUS_PATTERNS = [
     (re.compile(r"sali[oó] de la regi[oó]n de origen"
                 r"|left the (?:departure|origin)", re.IGNORECASE), "left_origin"),
     (re.compile(r"con transportista local|with (?:the )?local carrier"
-                r"|collected by the carrier", re.IGNORECASE), "local_carrier"),
+                r"|collected by the carrier|in local transit"
+                r"|en tr[aá]nsito local", re.IGNORECASE), "local_carrier"),
     (re.compile(r"en tu pa[ií]s/regi[oó]n|en tu pa[ií]s"
                 r"|in your country(?:/region)?", re.IGNORECASE), "in_country"),
     (re.compile(r"centro de distribuci[oó]n|distribution cent(?:er|re)", re.IGNORECASE), "at_distribution"),
