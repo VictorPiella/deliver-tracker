@@ -37,7 +37,8 @@ from .models import (
     get_last_sync, get_session, set_last_sync, Package, UnparsedEmail,
 )
 from .timeutils import utcnow, to_utc_naive
-from .sync import evento_anclable, evento_ya_visto, ingest_event, ingest_carrier_event
+from .sync import (actualizar_desde_correos, evento_anclable, evento_ya_visto,
+                   ingest_event, ingest_carrier_event)
 from .parsers import amazon, aliexpress, gls, correos, shopify
 
 # --- Configuración ---
@@ -326,6 +327,17 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
             else:
                 duplicated += 1
 
+    # Ya con los emails leídos, se le pregunta a Correos por los envíos que
+    # siguen en movimiento. Va aquí, al final y en su propio try, por una razón:
+    # es lo único que depende de que internet responda, y no puede llevarse por
+    # delante un escaneo de emails que ya ha salido bien. Si falla, el panel se
+    # queda con lo que digan los emails, que es como estaba antes.
+    correos_resumen = {"consultados": 0, "eventos": 0, "fallos": 0}
+    try:
+        correos_resumen = actualizar_desde_correos(session, log=log)
+    except Exception as e:  # noqa: BLE001 - da igual qué falle, no debe cortar el escaneo
+        log(f"[correos] consulta omitida: {type(e).__name__}: {e}")
+
     # Sólo se marca el escaneo como hecho si se ha llegado hasta aquí sin
     # excepción. Si Gmail falla a mitad, el marcador no avanza y el siguiente
     # intento vuelve a cubrir la misma ventana.
@@ -334,6 +346,9 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
     session.close()
 
     summary = {
+        "correos_consultados": correos_resumen["consultados"],
+        "correos_eventos": correos_resumen["eventos"],
+        "correos_fallos": correos_resumen["fallos"],
         "scanned": scanned,
         "ingested": ingested,
         "duplicated": duplicated,

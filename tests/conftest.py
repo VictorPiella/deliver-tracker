@@ -50,6 +50,20 @@ def sin_archivado_automatico(monkeypatch):
     monkeypatch.setattr(cleanup, "PURGE_DELIVERED_AFTER_DAYS", 0)
 
 
+@pytest.fixture(autouse=True)
+def sin_salir_a_internet(monkeypatch):
+    """
+    Ningún test habla con Correos de verdad.
+
+    run_sync pregunta a la API de Correos al final (ver sync.actualizar_desde_correos),
+    así que sin esto media suite estaría llamando a un servidor ajeno: lenta,
+    dependiente de que haya red, y dando la lata a una API que no es nuestra.
+    Los tests que prueban esa parte se traen su propia respuesta grabada.
+    """
+    import app.correos_api as correos_api
+    monkeypatch.setattr(correos_api, "HABILITADO", False)
+
+
 @pytest.fixture
 def db_path(tmp_path):
     """Ruta a una SQLite nueva por test."""

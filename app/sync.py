@@ -6,7 +6,8 @@ emails desordenados o duplicados no rebobinen el estado).
 """
 from datetime import datetime
 from sqlalchemy.exc import IntegrityError
-from .models import Order, OrderItem, Package, PackageEvent, STATUS_CANCELLED, STATUS_ORDER
+from .models import (Order, OrderItem, Package, PackageEvent, STATUS_CANCELLED,
+                     STATUS_FINALES, STATUS_ORDER)
 
 
 def status_rank(status: str) -> int:
@@ -472,3 +473,103 @@ def ingest_carrier_event(session, event: dict, courier: str) -> bool:
         return False
 
     return True
+
+
+# ---------------------------------------------------------------------------
+# Seguimiento preguntado a Correos (ver app/correos_api.py)
+# ---------------------------------------------------------------------------
+
+def ingest_tracking_event(session, package: Package, evento: dict) -> bool:
+    """
+    Apunta un evento que NO viene de un email, sino del transportista.
+
+    Se reutiliza la columna gmail_message_id como identificador único del
+    evento: no es un id de Gmail, pero es lo que ya garantiza que nada se
+    apunte dos veces, y partirlo en dos columnas para esto no aportaba nada.
+    Los ids de Correos van marcados con el prefijo "correos:" para que se
+    distingan de un vistazo en la base.
+    """
+    if session.query(PackageEvent).filter_by(gmail_message_id=evento["id"]).first():
+        return False
+
+    session.add(PackageEvent(
+        package_id=package.id,
+        status=evento["estado"],
+        status_label_raw=evento["texto"],
+        gmail_message_id=evento["id"],
+        gmail_subject=evento["texto"],
+        event_date=evento["fecha"],
+    ))
+    # Mismas reglas que con los emails: sólo avanza, y un estado puesto a mano
+    # desde el panel manda sobre esto igual que manda sobre un email.
+    #
+    # last_updated va con la fecha DEL EVENTO, no con la de ahora, igual que en
+    # ingest_event: es cuándo se movió el paquete, no cuándo nos enteramos. Si
+    # no, preguntar a Correos subiría el paquete al principio de la lista cada
+    # vez, aunque no hubiera pasado nada nuevo.
+    if apply_status(package, evento["estado"]):
+        package.status_label_raw = evento["texto"]
+        package.last_updated = evento["fecha"]
+    return True
+
+
+def paquetes_a_consultar(session) -> list:
+    """
+    Los que vale la pena preguntarle a Correos: los que llevan un número suyo y
+    todavía se pueden mover.
+
+    Se dejan fuera los entregados y los cancelados — ya no van a cambiar — y los
+    de la papelera, que para eso se borraron. Preguntar por ellos sería gastar
+    llamadas en una API que no es nuestra.
+    """
+    from .correos_api import numero_plausible
+
+    candidatos = (
+        session.query(Package)
+        .filter(Package.deleted_at.is_(None))
+        .filter(~Package.status.in_(tuple(STATUS_FINALES)))
+        .all()
+    )
+    salida = []
+    for p in candidatos:
+        es_de_correos = "correos" in ((p.courier or "") + " " + (p.source or "")).lower()
+        if not es_de_correos:
+            continue
+        numero = p.courier_tracking_number or p.external_package_id
+        if numero_plausible(numero):
+            salida.append((p, numero.strip()))
+    return salida
+
+
+def actualizar_desde_correos(session, log=print) -> dict:
+    """
+    Pregunta a Correos por los envíos que siguen en movimiento y apunta lo que
+    cuente.
+
+    Si Correos no contesta, no contesta: se anota en el log y se sigue. Esta es
+    la única parte del programa que depende de que internet vaya, y no puede
+    llevarse por delante un escaneo de emails que ya ha ido bien.
+    """
+    from .correos_api import HABILITADO, MAX_CONSULTAS, CorreosNoContesta, consultar
+
+    resumen = {"consultados": 0, "eventos": 0, "fallos": 0}
+    if not HABILITADO:
+        return resumen
+
+    for package, numero in paquetes_a_consultar(session)[:MAX_CONSULTAS]:
+        resumen["consultados"] += 1
+        try:
+            eventos = consultar(numero)
+        except CorreosNoContesta as e:
+            resumen["fallos"] += 1
+            log(f"[correos] {numero}: no se ha podido preguntar ({e})")
+            continue
+
+        nuevos = sum(1 for ev in eventos if ingest_tracking_event(session, package, ev))
+        if nuevos:
+            resumen["eventos"] += nuevos
+            log(f"[correos] + {nuevos} evento(s) {numero} -> {package.status}")
+
+    if resumen["eventos"] or resumen["fallos"]:
+        session.commit()
+    return resumen
