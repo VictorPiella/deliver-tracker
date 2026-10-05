@@ -142,3 +142,68 @@ class TestLaSeleccionEnElPanel:
         s = get_session(db_path)
         assert s.get(Package, ids[0]).deleted_at is None
         s.close()
+
+
+class TestElScriptDeSeleccionNoEstaRoto:
+    """
+    El arrastre no funcionaba y no era por la lógica: el script entero no
+    compilaba. Un `\\n` dentro de un confirm se había convertido en un salto de
+    línea de verdad y partía la cadena en dos, así que el navegador descartaba
+    TODO el bloque con un SyntaxError silencioso. La página se veía bien y nada
+    respondía.
+
+    Un test no puede ejecutar JavaScript, pero sí puede detectar la forma del
+    fallo: una cadena de texto no puede cruzar un salto de línea.
+    """
+
+    def script_de_seleccion(self, client):
+        html = client.get("/").get_data(as_text=True)
+        inicio = html.index("const seleccion = new Set()")
+        return html[html.index("<script>", inicio - 2000):html.index("</script>", inicio)]
+
+    def test_ninguna_cadena_se_parte_en_dos_lineas(self, client):
+        import re as _re
+
+        sincronizar(client)
+        for linea in self.script_de_seleccion(client).splitlines():
+            # Se quitan las cadenas bien cerradas; si queda una comilla suelta,
+            # es que la cadena sigue en la línea siguiente.
+            limpia = _re.sub(r"'(?:\\\\.|[^'\\\\])*'", "", linea)
+            limpia = _re.sub(r'"(?:\\\\.|[^"\\\\])*"', "", limpia)
+            limpia = limpia.split("//")[0]
+            assert "'" not in limpia, f"comilla sin cerrar: {linea.strip()[:70]}"
+
+    def test_el_arrastre_no_se_aparta_de_enlaces_ni_botones(self, client):
+        """
+        Las filas están cubiertas de cosas pinchables. Si el arranque del
+        arrastre descartara los enlaces y botones como hace el click, no
+        quedaría sitio por donde empezar: pulsaras donde pulsaras, nada.
+        """
+        sincronizar(client)
+        script = self.script_de_seleccion(client)
+        arranque = script[script.index("mousedown"):script.index("dragstart")]
+        assert "input, textarea, select" in arranque
+        assert "a, button" not in arranque
+
+    def test_pero_el_click_si_los_respeta(self, client):
+        """Pinchar un enlace tiene que seguir llevándote al enlace."""
+        sincronizar(client)
+        script = self.script_de_seleccion(client)
+        clic = script[script.index("addEventListener('click'"):script.index("mousedown")]
+        assert "a, button, input, select, textarea, details" in clic
+
+    def test_hay_un_umbral_antes_de_considerarlo_arrastre(self, client):
+        """Sin él, cualquier temblor al pinchar parecería un arrastre."""
+        sincronizar(client)
+        assert "huboArrastre" in self.script_de_seleccion(client)
+
+    def test_se_cancela_el_click_de_despues_de_arrastrar(self, client):
+        """
+        Soltar encima del título te llevaría a la ficha, y soltar encima del
+        botón de borrar sería bastante peor.
+        """
+        sincronizar(client)
+        script = self.script_de_seleccion(client)
+        suelta = script[script.index("mouseup"):]
+        assert "preventDefault" in suelta
+        assert "stopImmediatePropagation" in suelta

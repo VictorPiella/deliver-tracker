@@ -369,9 +369,7 @@
     if (!seleccion.size) return;
     const n = seleccion.size;
     if (n >= CONFIRMAR_A_PARTIR_DE &&
-        !confirm('¿Mover ' + n + ' paquetes a la papelera?
-
-Podrás recuperarlos desde la papelera.')) {
+        !confirm('¿Mover ' + n + ' paquetes a la papelera? Podrás recuperarlos desde la papelera.')) {
       return;
     }
     campoIds.value = Array.from(seleccion).join(',');
@@ -396,14 +394,34 @@ Podrás recuperarlos desde la papelera.')) {
   });
 
   // --- arrastrar para seleccionar ---
+  //
+  // Aquí NO se descartan los enlaces y botones, al revés que en el click. Las
+  // filas están cubiertas casi enteras de cosas pinchables — la miniatura, el
+  // título, el lápiz, el desplegable de estado, los botones — así que
+  // apartándose de todas ellas no quedaba sitio por donde empezar a arrastrar:
+  // pulsaras donde pulsaras, no arrancaba nunca.
+  //
+  // Se empieza igual, y es el umbral de más abajo el que decide qué fue: si no
+  // llegas a moverte, el click sigue su camino y el enlace funciona; si te
+  // mueves, era un arrastre y el click se traga al soltar.
+  //
+  // Los campos de texto sí se respetan: ahí arrastrar es seleccionar letras, y
+  // eso no hay que quitárselo a nadie.
   lista.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
-    if (e.target.closest('a, button, input, select, textarea, details')) return;
+    if (e.target.closest('input, textarea, select, [contenteditable]')) return;
     arrastrando = true;
     huboArrastre = false;
     origenX = e.pageX;
     origenY = e.pageY;
     if (!e.ctrlKey && !e.metaKey) seleccion.clear();
+  });
+
+  // El navegador quiere arrastrar los enlaces y las imágenes por su cuenta
+  // (para soltarlos en otra ventana). Con eso activo, el arrastre se convertía
+  // en un "fantasma" del enlace pegado al cursor y la goma no aparecía.
+  lista.addEventListener('dragstart', (e) => {
+    if (arrastrando) e.preventDefault();
   });
 
   document.addEventListener('mousemove', (e) => {
@@ -438,11 +456,15 @@ Podrás recuperarlos desde la papelera.')) {
     if (!arrastrando) return;
     arrastrando = false;
     goma.hidden = true;
-    // Si hubo arrastre, el 'click' que viene detrás no debe deshacer lo
-    // seleccionado: se traga una vez.
+    // Si hubo arrastre, el 'click' que viene detrás hay que pararlo: si no,
+    // soltar encima del título te llevaría a la ficha del paquete, y soltar
+    // encima del botón de borrar sería bastante peor. Se captura en document,
+    // antes de que llegue a nadie, y una sola vez.
     if (huboArrastre) {
-      lista.addEventListener('click', (e) => e.stopImmediatePropagation(),
-                             { capture: true, once: true });
+      document.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }, { capture: true, once: true });
     }
   });
 
