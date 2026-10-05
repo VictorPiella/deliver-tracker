@@ -143,3 +143,98 @@ class TestFormatoMerge:
         # Si AliExpress cambia la plantilla, mejor no ingerir nada que ingerir
         # eventos vacíos que ensucien la base.
         assert parse("Tus 2 paquetes tienen actualizaciones de entrega", "<p>plantilla nueva</p>") is None
+
+
+class TestAliExpressTambienEscribeEnIngles:
+    """
+    Siete emails seguidos de un mismo paquete llegaron en inglés y ninguno se
+    entendió: ese envío no existía para el panel. Aparecieron todos en "sin
+    reconocer", que es exactamente para lo que está esa pantalla.
+
+    Los asuntos son los del buzón, tal cual.
+    """
+
+    def estado(self, asunto):
+        return aliexpress.detect_status(asunto)
+
+    def test_los_asuntos_reales_que_no_se_entendian(self):
+        casos = [
+            ("Package PHBW6T9812926090108552J has cleared customs", "customs_cleared"),
+            ("Package PHBW6T9812926090108552J: at customs", "customs"),
+            ("Package PHBW6T9812926090108552J: in your country/region", "in_country"),
+            ("Package PHBW6T9812926090108552J: left the departure region", "left_origin"),
+            ("Order 3076348326202839: collected by the carrier", "local_carrier"),
+        ]
+        for asunto, esperado in casos:
+            assert self.estado(asunto) == esperado, asunto
+
+    def test_aduana_pasada_gana_a_aduana(self):
+        """
+        "has cleared customs" contiene "customs". Si ganara el patrón de
+        aduanas, un paquete que ya ha pasado la aduana retrocedería.
+        """
+        assert self.estado("Package X has cleared customs") == "customs_cleared"
+
+    def test_sigue_entendiendo_el_castellano(self):
+        assert self.estado("Paquete 315193141453520012: en aduanas") == "customs"
+        assert self.estado("Pedido 3074309624382839: pedido enviado") == "shipped"
+        assert self.estado("Paquete 315193140438420019 entregado") == "delivered"
+
+    def test_el_id_alfanumerico_se_coge(self):
+        """
+        Con "Paquete\\s+(\\d+)" sólo valían los numéricos, y este no lo es.
+        """
+        r = aliexpress.parse(aliexpress.SENDER,
+                             "Package PHBW6T9812926090108552J has cleared customs",
+                             "", "m", EVENT_DATE)
+        assert r["package_id"] == "PHBW6T9812926090108552J"
+        assert r["status"] == "customs_cleared"
+
+    def test_los_ids_de_siempre_siguen_valiendo(self):
+        for asunto, pid in (
+            ("Paquete 315193141453520012: en aduanas", "315193141453520012"),
+            ("Actualización del paquete AP00824363068180", "AP00824363068180"),
+        ):
+            assert aliexpress.parse(aliexpress.SENDER, asunto, "", "m", EVENT_DATE)["package_id"] == pid
+
+    def test_una_palabra_no_se_confunde_con_un_id(self):
+        """
+        Aceptar [A-Za-z0-9] con IGNORECASE hacía que "Package delivered" dejara
+        "delivered" de identificador. Se exige que lleve algún dígito.
+        """
+        r = aliexpress.parse(aliexpress.SENDER, "Package delivered successfully",
+                             "", "m", EVENT_DATE)
+        assert r["package_id"] != "delivered"
+
+    def test_el_pedido_en_ingles_tambien(self):
+        r = aliexpress.parse(aliexpress.SENDER,
+                             "Order 3076348326202839: collected by the carrier",
+                             "", "m", EVENT_DATE)
+        assert r["order_id"] == "3076348326202839"
+        assert r["status"] == "local_carrier"
+
+    def test_dejan_de_caer_en_sin_reconocer(self, db_path):
+        from app.gmail_sync import run_sync
+        from app.models import Package, UnparsedEmail, get_session
+
+        asuntos = [
+            "Package PHBW6T9812926090108552J has cleared customs",
+            "Package PHBW6T9812926090108552J: at customs",
+            "Package PHBW6T9812926090108552J: in your country/region",
+        ]
+        run_sync(db_path,
+                 lambda q: [{"id": f"ali-en-{i}", "subject": a,
+                             "sender": "AliExpress <transaction@notice.aliexpress.com>",
+                             "date": "2026-10-01T10:00:00+00:00"}
+                            for i, a in enumerate(asuntos)],
+                 lambda m: {"plaintext_body": "", "html_body": ""},
+                 log=lambda *a: None)
+
+        s = get_session(db_path)
+        assert s.query(UnparsedEmail).count() == 0
+        # Los tres hablan del mismo paquete: uno solo, no tres.
+        assert s.query(Package).count() == 1
+        p = s.query(Package).one()
+        assert p.external_package_id == "PHBW6T9812926090108552J"
+        assert p.status == "in_country"      # el mas avanzado de los tres
+        s.close()

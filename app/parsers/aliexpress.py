@@ -20,21 +20,40 @@ import re
 SENDER = "transaction@notice.aliexpress.com"
 
 # Frases de texto libre -> estado normalizado. Iteramos en orden: la primera que matchea gana.
+#
+# En castellano Y en inglés. AliExpress manda las dos versiones a la misma
+# cuenta — siete emails seguidos de un mismo paquete llegaron en inglés y
+# ninguno se entendió, así que ese envío no existía para el panel. Salieron en
+# la pantalla de "sin reconocer", que para eso está.
+#
+# Ojo con el orden: "has cleared customs" tiene que ir ANTES que "customs", si
+# no un paquete que ya ha pasado la aduana se quedaría en "en aduanas".
 STATUS_PATTERNS = [
-    (re.compile(r"pedido enviado", re.IGNORECASE), "shipped"),
-    (re.compile(r"en aduanas?", re.IGNORECASE), "customs"),
-    (re.compile(r"ha pasado la aduana|aduana superada", re.IGNORECASE), "customs_cleared"),
-    (re.compile(r"sali[oó] de la regi[oó]n de origen", re.IGNORECASE), "left_origin"),
-    (re.compile(r"con transportista local", re.IGNORECASE), "local_carrier"),
-    (re.compile(r"en tu pa[ií]s/regi[oó]n|en tu pa[ií]s", re.IGNORECASE), "in_country"),
-    (re.compile(r"centro de distribuci[oó]n", re.IGNORECASE), "at_distribution"),
-    (re.compile(r"entregado", re.IGNORECASE), "delivered"),
-    (re.compile(r"actualizaci[oó]n del paquete", re.IGNORECASE), "unknown"),  # AP... sin estado claro, lo dejamos unknown
+    (re.compile(r"pedido enviado|order shipped", re.IGNORECASE), "shipped"),
+    (re.compile(r"ha pasado la aduana|aduana superada"
+                r"|(?:has |have )?cleared customs|customs clear", re.IGNORECASE), "customs_cleared"),
+    (re.compile(r"en aduanas?|at customs|in customs", re.IGNORECASE), "customs"),
+    (re.compile(r"sali[oó] de la regi[oó]n de origen"
+                r"|left the (?:departure|origin)", re.IGNORECASE), "left_origin"),
+    (re.compile(r"con transportista local|with (?:the )?local carrier"
+                r"|collected by the carrier", re.IGNORECASE), "local_carrier"),
+    (re.compile(r"en tu pa[ií]s/regi[oó]n|en tu pa[ií]s"
+                r"|in your country(?:/region)?", re.IGNORECASE), "in_country"),
+    (re.compile(r"centro de distribuci[oó]n|distribution cent(?:er|re)", re.IGNORECASE), "at_distribution"),
+    (re.compile(r"entregado|delivered", re.IGNORECASE), "delivered"),
+    # Sin estado claro en el asunto; se deja unknown para que no pise a nada.
+    (re.compile(r"actualizaci[oó]n del paquete|has an update", re.IGNORECASE), "unknown"),
 ]
 
-ORDER_SUBJECT_RE = re.compile(r"Pedido\s+(\d+)\s*:", re.IGNORECASE)
-PACKAGE_SUBJECT_RE = re.compile(r"Paquete\s+(\d+)", re.IGNORECASE)
-AP_PACKAGE_RE = re.compile(r"paquete\s+(AP\d+)", re.IGNORECASE)
+ORDER_SUBJECT_RE = re.compile(r"(?:Pedido|Order)\s+(\d+)\s*:", re.IGNORECASE)
+# El id de paquete NO es siempre numérico: junto a los de toda la vida
+# (315193141453520012) y los "AP...", llegan otros como
+# PHBW6T9812926090108552J. Con "Paquete\s+(\d+)" esos no se cogían.
+#
+# Se exige mayúsculas y que lleve algún dígito a propósito: con [A-Za-z0-9] y
+# IGNORECASE, un "Package delivered" dejaba "delivered" de id.
+PACKAGE_SUBJECT_RE = re.compile(r"(?i:Paquete|Package)\s+((?=[A-Z0-9]*\d)[A-Z0-9]{8,})")
+AP_PACKAGE_RE = re.compile(r"(?i:paquete|package)\s+(AP\d+)")
 
 # La imagen del producto va en un <td class="...productImage"><img src="...">
 # servida desde ae-pic-a1.aliexpress-media.com o ae01.alicdn.com
