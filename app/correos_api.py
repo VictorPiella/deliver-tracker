@@ -155,9 +155,24 @@ def _pedir(numero: str) -> dict:
     peticion = urllib.request.Request(url, headers=_CABECERAS)
     try:
         with urllib.request.urlopen(peticion, timeout=TIMEOUT) as respuesta:
-            return json.loads(respuesta.read().decode("utf-8", "replace"))
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+            crudo = respuesta.read().decode("utf-8", "replace").strip()
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
         raise CorreosNoContesta(f"{type(e).__name__}: {e}") from e
+
+    # Un envío que no es suyo se contesta con 204 y el cuerpo vacío. Eso es una
+    # respuesta, no un fallo, y la diferencia importa: un fallo se reintenta y
+    # se cuenta como tal, un "no lo conozco" no.
+    #
+    # Antes el cuerpo vacío reventaba al parsear el JSON y acababa contado como
+    # caída de Correos. El panel decía que Correos fallaba cada hora por cada
+    # paquete que no era suyo — que son casi todos.
+    if not crudo:
+        return {}
+
+    try:
+        return json.loads(crudo)
+    except ValueError as e:
+        raise CorreosNoContesta(f"respuesta ilegible: {e}") from e
 
 
 def consultar(numero: str) -> list[dict]:

@@ -98,6 +98,41 @@ class TestLeerLaRespuesta:
         monkeypatch.setattr(correos_api, "_pedir", lambda n: {"shipment": []})
         assert consultar(NUMERO) == []
 
+    def test_un_envio_que_no_es_suyo_contesta_vacio_y_no_es_un_fallo(self, monkeypatch):
+        """
+        Correos devuelve 204 y cuerpo vacío para un número que no es suyo. Eso
+        es una respuesta, no una caída.
+
+        Reventaba al parsear el JSON y acababa contado como fallo de Correos, lo
+        que significaba que el panel reportaba una caída por hora y por cada
+        paquete ajeno — que son casi todos. Lo destapó buscar un envío de
+        YunExpress en Correos.
+        """
+        import urllib.request
+
+        class RespuestaVacia:
+            def read(self): return b""
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        monkeypatch.setattr(correos_api, "HABILITADO", True)
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: RespuestaVacia())
+        assert consultar(NUMERO) == []          # ni excepción ni eventos
+
+    def test_una_respuesta_ilegible_si_es_un_fallo(self, monkeypatch):
+        """Vacío es "no lo conozco"; basura es que algo va mal y hay que decirlo."""
+        import urllib.request
+
+        class RespuestaBasura:
+            def read(self): return b"<html>vaya</html>"
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        monkeypatch.setattr(correos_api, "HABILITADO", True)
+        monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: RespuestaBasura())
+        with pytest.raises(CorreosNoContesta):
+            consultar(NUMERO)
+
     def test_un_numero_con_pinta_rara_ni_se_pregunta(self):
         assert consultar("") == []
         assert consultar("corto") == []
