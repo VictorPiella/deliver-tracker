@@ -1440,3 +1440,14 @@ a.thumb-wrap:hover .thumb { border-color: var(--accent); }
   border-top: 1px solid var(--border-soft);
 }
 .chip-gris { background: var(--surface-2); color: var(--text-muted); }
+
+
+/* Tramo que llego solo del transportista y no se ha podido enlazar. */
+.chip-suelto {
+  background: var(--s-cyan-bg);
+  color: var(--s-cyan);
+  text-transform: none;
+  text-decoration: none;
+  cursor: help;
+}
+.chip-suelto:hover { outline: 1px solid var(--s-cyan); }

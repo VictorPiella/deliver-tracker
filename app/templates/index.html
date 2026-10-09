@@ -114,6 +114,13 @@
       </form>
       <div class="pkg-meta">
         <span class="chip chip-{{ p.source }}">{{ p.source }}</span>
+        {% if p.tramo_suelto %}
+        <a class="chip chip-suelto"
+           href="{{ url_for('package_detail', package_id=p.id) }}#fusionar"
+           title="Esto llegó solo del transportista y no se ha podido enlazar con ninguna tienda: su email no nombra el pedido. Si sabes de qué paquete es, entra y fusiónalo — sólo hay que hacerlo una vez.">
+          sin pedido
+        </a>
+        {% endif %}
         {% if p.posible_duplicado %}
         <a class="chip chip-duplicado"
            href="{{ url_for('package_detail', package_id=p.id) }}"

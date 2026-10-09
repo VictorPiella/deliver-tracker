@@ -213,6 +213,65 @@ def marcar_posibles_duplicados(filas: list) -> None:
                                          if otra["id"] != fila["id"]]
 
 
+def _candidatos_para_fusionar(db, package) -> list:
+    """
+    Con qué paquetes se puede fusionar este, los más plausibles primero.
+
+    Es una ORDENACIÓN, no una decisión: todos los paquetes siguen en la lista y
+    fusionar lo sigue haciendo una persona. Pero con quince filas en un
+    desplegable, encontrar la buena era una lata, y la pista barata existe.
+
+    Lo que se mira para ponerlos arriba:
+
+    - Que uno de los dos sea una entrada suelta de transportista (sin nombre):
+      es justo el caso que hay que enlazar, un tramo que llegó por su cuenta.
+    - Que estén vivos los dos y se hayan movido con pocos días de diferencia.
+
+    Lo que NO se mira es el parecido del nombre. Dos compras del mismo producto
+    son dos paquetes — pedir algo, cancelarlo y volver a pedirlo deja dos
+    pedidos legítimos idénticos — y ordenarlos por nombre invitaría justo al
+    error que no se puede deshacer.
+    """
+    from .models import STATUS_FINALES
+
+    otros = (db.query(Package)
+             .filter(Package.deleted_at.is_(None), Package.id != package.id)
+             .all())
+
+    TRANSPORTISTAS = {"ctt", "correos", "gls"}
+    soy_suelto = package.source in TRANSPORTISTAS and not package.title
+
+    def plausibilidad(otro):
+        puntos = 0
+        # Un tramo suelto de transportista contra un paquete de tienda con
+        # nombre: es exactamente la pareja que hay que juntar.
+        es_suelto = otro.source in TRANSPORTISTAS and not otro.title
+        if soy_suelto and not es_suelto:
+            puntos += 2
+        if es_suelto and not soy_suelto:
+            puntos += 2
+        # Dos cosas que siguen en marcha tienen más que ver entre sí que una
+        # entregada hace tres meses.
+        if (package.status not in STATUS_FINALES
+                and otro.status not in STATUS_FINALES):
+            puntos += 1
+        if package.last_updated and otro.last_updated:
+            dias = abs((package.last_updated - otro.last_updated).days)
+            if dias <= 10:
+                puntos += 1
+        return puntos
+
+    ordenados = sorted(
+        otros,
+        key=lambda o: (-plausibilidad(o), -(o.last_updated.timestamp() if o.last_updated else 0)),
+    )
+    return [{
+        "id": o.id,
+        "etiqueta": f"{nombre_visible(o)} · {o.source}"
+                    f"{'  ← posible' if plausibilidad(o) >= 3 else ''}",
+    } for o in ordenados]
+
+
 def nombre_visible(package) -> str:
     """
     Cómo llamar a un paquete en el panel, de mejor a peor:
@@ -350,6 +409,14 @@ def register_routes(app: Flask) -> None:
         # "Finalizado" incluye los cancelados: un pedido cancelado no está en
         marcar_posibles_duplicados(data)
 
+        # Las entradas que llegaron solas de un transportista y no se han
+        # podido colgar de ninguna tienda: son las que piden que alguien las
+        # enlace, y hasta ahora habia que entrar a la ficha para enterarse.
+        sueltos = {p.id for p in packages
+                   if p.source in ("ctt", "correos", "gls") and not p.title}
+        for fila in data:
+            fila["tramo_suelto"] = fila["id"] in sueltos
+
         # tránsito, pero tampoco se ha entregado.
         resumen = {
             "total": len(data),
@@ -443,16 +510,7 @@ def register_routes(app: Flask) -> None:
             ),
             "seguimiento_a_mano": requiere_datos_a_mano(p.source),
         }
-        candidatos = [{
-            "id": otro.id,
-            "etiqueta": f"{(otro.order.title if otro.order else None) or otro.external_package_id}"
-                        f" · {otro.source}",
-        } for otro in (
-            g.db.query(Package)
-            .filter(Package.deleted_at.is_(None), Package.id != p.id)
-            .order_by(Package.last_updated.desc())
-            .all()
-        )]
+        candidatos = _candidatos_para_fusionar(g.db, p)
 
         return render_template(
             "detail.html",

@@ -142,7 +142,7 @@
 </div>
 
 {% if candidatos %}
-<details class="merge-box">
+<details class="merge-box" id="fusionar">
   <summary>¿Es el mismo envío que otro de la lista? Fusionarlos</summary>
   <p class="merge-help">
     Correos no incluye ningún identificador de Amazon ni de AliExpress en sus
@@ -233,3 +233,16 @@ Sus eventos se moverán al otro y esta entrada desaparecerá.');">
 {% endif %}
 
 {% endblock %}
+
+<script>
+  // Si se llega con #fusionar (desde la etiqueta "sin pedido" del panel), se
+  // abre el desplegable solo: si no, aterrizas en una ficha donde no se ve
+  // nada de lo que venias a hacer.
+  (function () {
+    if (location.hash !== '#fusionar') return;
+    const caja = document.getElementById('fusionar');
+    if (!caja) return;
+    caja.open = true;
+    caja.scrollIntoView({ block: 'center' });
+  })();
+</script>
