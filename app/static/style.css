@@ -1417,3 +1417,26 @@ a.thumb-wrap:hover .thumb { border-color: var(--accent); }
   text-decoration: none;
 }
 .chip-duplicado:hover { outline: 1px solid var(--s-amber); }
+
+
+/* Recorrido de un envio que ha cambiado de transportista por el camino. */
+.tramos { list-style: none; margin: 0; padding: 0; }
+.tramos li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 13px;
+}
+.tramos li:last-child { border-bottom: 0; }
+.tramos .mono { font-family: var(--font-mono); font-size: 12px; color: var(--text-soft); }
+.tramos-nota {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-soft);
+}
+.chip-gris { background: var(--surface-2); color: var(--text-muted); }

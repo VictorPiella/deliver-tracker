@@ -168,6 +168,25 @@ Sus eventos se moverán al otro y esta entrada desaparecerá.');">
 </details>
 {% endif %}
 
+{% if package.numeros|length > 1 %}
+<h2 class="section-title">Recorrido · {{ package.numeros|length }} tramos</h2>
+<div class="card">
+  <ul class="tramos">
+    {% for n in package.numeros %}
+    <li>
+      <span class="chip chip-{{ n.courier or 'gris' }}">{{ n.courier or 'sin identificar' }}</span>
+      <span class="mono">{{ n.numero }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="tramos-nota">
+    Este envío ha pasado por varios transportistas. Ningún email relaciona un
+    número con otro, así que se enlazaron a mano una vez; a partir de ahí los
+    correos de cualquiera de ellos llegan solos a este paquete.
+  </p>
+</div>
+{% endif %}
+
 {% if package.articulos %}
 <h2 class="section-title">
   Contenido · {{ package.articulos|length }} artículo{{ '' if package.articulos|length == 1 else 's' }}

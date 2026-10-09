@@ -7,7 +7,8 @@ emails desordenados o duplicados no rebobinen el estado).
 import re
 from datetime import datetime
 from sqlalchemy.exc import IntegrityError
-from .models import (EmailProcesado, Order, OrderItem, Package, PackageEvent, STATUS_CANCELLED,
+from .models import (EmailProcesado, NumeroDeSeguimiento, Order, OrderItem, Package,
+                     PackageEvent, STATUS_CANCELLED,
                      STATUS_FINALES, STATUS_ORDER)
 
 
@@ -124,6 +125,26 @@ def merge_packages(session, origen: Package, destino: Package) -> int:
         destino.courier = origen.courier
     if origen.courier_tracking_number and not destino.courier_tracking_number:
         destino.courier_tracking_number = origen.courier_tracking_number
+
+    # Los numeros del origen se mudan al destino, TODOS. Antes solo sobrevivia
+    # uno, asi que fusionar a mano dos tramos del mismo envio no se quedaba
+    # pegado: el siguiente email del transportista perdido volvia a crear otra
+    # fila y habia que fusionar otra vez, cada vez.
+    for numero in (origen.courier_tracking_number, origen.external_package_id):
+        registrar_numero(session, origen, numero, origen.courier)
+    # Y los del destino, que normalmente son de antes de que esta tabla
+    # existiera y si no se apuntan aqui la cadena queda a medias: se veria el
+    # tramo nuevo y no el original.
+    for numero in (destino.courier_tracking_number, destino.external_package_id):
+        registrar_numero(session, destino, numero, destino.courier)
+    session.flush()
+    ids = [n.id for n in origen.numeros]
+    if ids:
+        session.query(NumeroDeSeguimiento).filter(NumeroDeSeguimiento.id.in_(ids)).update(
+            {NumeroDeSeguimiento.package_id: destino.id}, synchronize_session=False
+        )
+        session.expire(origen, ["numeros"])
+        session.expire(destino, ["numeros"])
     if origen.eta and not destino.eta:
         destino.eta = origen.eta
     if origen.tracking_url and not destino.tracking_url:
@@ -272,6 +293,53 @@ def _guardar_articulos(session, order: Order, event: dict) -> None:
         ))
 
 
+def registrar_numero(session, package: Package, numero: str | None,
+                     courier: str | None = None) -> bool:
+    """
+    Apunta un número de seguimiento al paquete. Devuelve True si era nuevo.
+
+    Es lo que hace que enlazar un tramo quede hecho para siempre: la próxima
+    vez que escriba ese transportista, su email encuentra el paquete por este
+    número en vez de crear una fila aparte.
+
+    Si el número ya estaba en OTRO paquete no se toca nada. Dos paquetes con el
+    mismo número son el mismo envío, pero resolver eso es cosa de la fusión por
+    número, no de aquí: moverlo a la brava dejaría el otro paquete sin su
+    identificador y con sus eventos colgando de nada.
+    """
+    if not numero or not str(numero).strip():
+        return False
+    numero = str(numero).strip()
+
+    ya = session.query(NumeroDeSeguimiento).filter_by(numero=numero).first()
+    if ya is not None:
+        if ya.package_id == package.id and courier and not ya.courier:
+            ya.courier = courier
+        return False
+
+    session.add(NumeroDeSeguimiento(package_id=package.id, numero=numero,
+                                    courier=courier))
+    return True
+
+
+def buscar_por_numero(session, numero: str | None) -> Package | None:
+    """
+    El paquete que lleva ese número, mire donde mire.
+
+    Primero en la tabla de números (que es la que admite varios por paquete) y
+    después en la columna de siempre, para los paquetes guardados antes de que
+    esa tabla existiera.
+    """
+    if not numero:
+        return None
+    numero = str(numero).strip()
+
+    fila = session.query(NumeroDeSeguimiento).filter_by(numero=numero).first()
+    if fila is not None:
+        return fila.package
+    return session.query(Package).filter_by(courier_tracking_number=numero).first()
+
+
 def ingest_event(session, event: dict) -> bool:
     """
     Procesa un evento normalizado (salida de los parsers) y lo persiste.
@@ -398,6 +466,12 @@ def ingest_event(session, event: dict) -> bool:
 
     if event.get("courier_tracking_number") and not package.courier_tracking_number:
         package.courier_tracking_number = event["courier_tracking_number"]
+    registrar_numero(session, package, event.get("courier_tracking_number"),
+                     event.get("courier"))
+    # El id del propio paquete suele ser un numero de seguimiento tambien (el de
+    # CTT, el de Correos). Apuntarlo permite que el email del transportista
+    # encuentre el paquete aunque la tienda nunca mencione a ese transportista.
+    registrar_numero(session, package, event.get("package_id"), event.get("courier"))
     if event.get("courier") and not package.courier:
         package.courier = event["courier"]
     # La URL SI se sobreescribe cuando llega una nueva: la del email de envio es
@@ -453,8 +527,10 @@ def ingest_carrier_event(session, event: dict, courier: str) -> bool:
     package = None
     if event.get("package_id"):
         package = session.query(Package).filter_by(external_package_id=event["package_id"]).first()
-    if package is None and event.get("tracking_number"):
-        package = session.query(Package).filter_by(courier_tracking_number=event["tracking_number"]).first()
+    if package is None:
+        package = buscar_por_numero(session, event.get("package_id"))
+    if package is None:
+        package = buscar_por_numero(session, event.get("tracking_number"))
     if package is None:
         return False
 
@@ -476,6 +552,9 @@ def ingest_carrier_event(session, event: dict, courier: str) -> bool:
         package.courier = courier
     if event.get("tracking_number") and not package.courier_tracking_number:
         package.courier_tracking_number = event["tracking_number"]
+    # Este tramo queda apuntado aunque el paquete ya tuviera otro numero: es
+    # justo el caso de un envio que cambia de transportista por el camino.
+    registrar_numero(session, package, event.get("tracking_number"), courier)
     # La fecha prevista de entrega la da el transportista, no la tienda, asi que
     # es justo aqui donde llega la buena. Se pisa la anterior a proposito: la
     # ultima que mandan es la que vale. Sin esto, CTT anunciaba la entrega para

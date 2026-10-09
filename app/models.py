@@ -60,6 +60,36 @@ class OrderItem(Base):
     order = relationship("Order", back_populates="items")
 
 
+class NumeroDeSeguimiento(Base):
+    """
+    Un numero de seguimiento de un paquete. Puede haber varios.
+
+    Un envio de AliExpress puede cruzar media Europa con YunExpress y hacer el
+    ultimo tramo con CTT, y cada tramo tiene SU numero. Antes el paquete tenia
+    una sola columna para esto, asi que:
+
+      - El envio salia dos veces en el panel, uno por transportista.
+      - Y al fusionarlos a mano se perdia uno de los dos numeros, de modo que el
+        siguiente email de ese transportista volvia a crear otra fila. Fusionar
+        no se quedaba pegado.
+
+    Con una fila por numero, enlazar un tramo se hace UNA vez y a partir de ahi
+    los emails de ese transportista encuentran el paquete solos.
+
+    El numero es unico en toda la tabla a proposito: un numero de seguimiento
+    identifica un envio, y si apareciera en dos paquetes es que son el mismo.
+    """
+    __tablename__ = "numeros_de_seguimiento"
+
+    id = Column(Integer, primary_key=True)
+    package_id = Column(Integer, ForeignKey("packages.id"), nullable=False)
+    courier = Column(String)                       # "ctt", "correos", "yunexpress"...
+    numero = Column(String, nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    package = relationship("Package", back_populates="numeros")
+
+
 class EmailProcesado(Base):
     """
     La lapida de un evento borrado: solo su gmail_message_id.
@@ -136,6 +166,8 @@ class Package(Base):
 
     order = relationship("Order", back_populates="packages")
     events = relationship("PackageEvent", back_populates="package", cascade="all, delete-orphan", order_by="PackageEvent.event_date")
+    numeros = relationship("NumeroDeSeguimiento", back_populates="package",
+                           cascade="all, delete-orphan")
 
 
 class UnparsedEmail(Base):

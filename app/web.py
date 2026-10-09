@@ -423,6 +423,10 @@ def register_routes(app: Flask) -> None:
             "status_is_manual": p.status_is_manual,
             "courier": p.courier,
             "courier_tracking_number": p.courier_tracking_number,
+            # El recorrido completo: un envío puede cambiar de transportista a
+            # mitad de camino y cada tramo tiene su número.
+            "numeros": [{"courier": n.courier, "numero": n.numero}
+                        for n in sorted(p.numeros, key=lambda n: n.id)],
             "eta": p.eta,
             "url_seguimiento": url_de_seguimiento(
                 p.source,
