@@ -329,6 +329,20 @@ def parse(sender: str, subject: str, body_text: str, message_id: str, event_date
     # fallidos, cambios de fecha), así que su estado sale del asunto.
     if status is None:
         status = status_desde_asunto_order_update(subject)
+    else:
+        # Y si el asunto dice algo concreto, manda sobre el remitente.
+        #
+        # Hacía falta: shipment-tracking@amazon.es tenía "en reparto" fijado, y
+        # por ahí llegan también los "Entregado: ...". Un paquete entregado se
+        # quedaba clavado en "En reparto" para siempre, porque ese remitente
+        # nunca miraba el asunto. Se veía en el panel y nadie lo relacionaba con
+        # el parser.
+        #
+        # Sólo pisa hacia un estado reconocido; si el asunto no dice nada claro
+        # se respeta el del remitente, que acierta en la mayoría de los casos.
+        del_asunto = status_desde_asunto_order_update(subject)
+        if del_asunto and del_asunto != "unknown":
+            status = del_asunto
 
     image_url = extract_image_url(html_body)
 

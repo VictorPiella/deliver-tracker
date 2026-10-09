@@ -207,3 +207,23 @@ class TestElScriptDeSeleccionNoEstaRoto:
         suelta = script[script.index("mouseup"):]
         assert "preventDefault" in suelta
         assert "stopImmediatePropagation" in suelta
+
+
+class TestLaBarraNoEstorbaCuandoNoHayNadaSeleccionado:
+    def test_el_css_respeta_el_atributo_hidden(self):
+        """
+        La barra lleva el atributo hidden, pero su clase trae display:flex, y
+        eso lo pisa: se veia siempre, con un boton de "Mover a la papelera" que
+        no movia nada. Lo destapo una captura de pantalla, no un test.
+        """
+        import io
+        css = io.open("app/static/style.css", encoding="utf-8").read()
+        assert ".barra-seleccion[hidden]" in css
+        assert "display: none" in css[css.index(".barra-seleccion[hidden]"):][:60]
+
+    def test_la_barra_sale_oculta_de_serie(self, client):
+        from conftest import sincronizar
+        sincronizar(client)
+        html = client.get("/").get_data(as_text=True)
+        trozo = html[html.index('id="barra-seleccion"'):]
+        assert "hidden" in trozo[:120]

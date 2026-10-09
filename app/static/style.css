@@ -1364,6 +1364,12 @@ a.thumb-wrap:hover .thumb { border-color: var(--accent); }
 /* Pero dentro de los campos si se tiene que poder seleccionar, claro. */
 .list input, .list textarea { user-select: text; }
 
+/* El atributo hidden pone display:none, pero un display: flex en la clase lo
+   pisa — asi que la barra se veia SIEMPRE, con cero paquetes seleccionados y
+   un boton de "Mover a la papelera" que no movia nada. Hace falta decirlo
+   explicitamente. */
+.barra-seleccion[hidden] { display: none; }
+
 .barra-seleccion {
   position: sticky;
   bottom: 14px;

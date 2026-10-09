@@ -176,3 +176,42 @@ class TestParseCompleto:
         assert resultado["event_date"] == EVENT_DATE
         # El asunto original se guarda tal cual para poder depurar después.
         assert resultado["status_label_raw"] == 'Enviado: "WOLTU Mesitas de Noche, Set..."'
+
+
+class TestElAsuntoMandaSobreElRemitente:
+    """
+    shipment-tracking@amazon.es tenia "en reparto" fijado y nunca se miraba el
+    asunto. Pero por ese mismo remitente llegan tambien los "Entregado: ...",
+    asi que un paquete entregado se quedaba clavado en "En reparto" para
+    siempre. Se veia en el panel y nadie lo relacionaba con el parser; lo
+    destapo una captura de pantalla para el README.
+    """
+    CUERPO = "Pedido n.º 408-1122334-5566778"
+
+    def estado(self, sender, subject):
+        r = amazon.parse(sender, subject, self.CUERPO, "m", EVENT_DATE)
+        return r["status"] if r else None
+
+    def test_entregado_desde_shipment_tracking_es_entregado(self):
+        assert self.estado("shipment-tracking@amazon.es",
+                           'Entregado: "Una cosa"') == "delivered"
+
+    def test_tambien_con_varios_productos(self):
+        assert self.estado("shipment-tracking@amazon.es",
+                           'Entregado: "Una cosa" y 1 producto más') == "delivered"
+
+    def test_un_intento_fallido_no_se_lee_como_reparto(self):
+        assert self.estado("shipment-tracking@amazon.es",
+                           'Intento de entrega: "Una cosa"') == "delivery_attempted"
+
+    def test_si_el_asunto_no_dice_nada_manda_el_remitente(self):
+        """El remitente acierta en la mayoría de los casos; sólo cede ante un
+        asunto que diga algo reconocible."""
+        assert self.estado("shipment-tracking@amazon.es",
+                           'En reparto: "Una cosa"') == "out_for_delivery"
+        assert self.estado("confirmar-envio@amazon.es",
+                           'Enviado: "Una cosa"') == "shipped"
+
+    def test_un_pedido_nuevo_sigue_siendo_un_pedido(self):
+        assert self.estado("auto-confirm@amazon.es",
+                           'Pedido: "Una cosa"') == "ordered"

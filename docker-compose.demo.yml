@@ -1,0 +1,32 @@
+# Demo con datos inventados. No necesita cuenta de Gmail ni credenciales:
+#
+#     docker compose -f docker-compose.demo.yml up --build
+#     http://localhost:5001
+#
+# La base vive en un volumen temporal, asi que al pararlo no queda nada.
+# Proyecto aparte: sin esto compose usa el nombre de la carpeta y la demo
+# recreaba el container de desarrollo, que es el que tiene tus datos de verdad.
+name: deliver-tracker-demo
+
+services:
+  deliver-tracker:
+    build:
+      context: .
+      target: prod
+    image: deliver-tracker:demo
+    container_name: deliver-tracker-demo
+    ports:
+      - "5001:5000"
+    environment:
+      DEMO_MODE: "true"
+      DB_PATH: /data/demo.db
+      TZ: Europe/Madrid
+      DISPLAY_TZ: Europe/Madrid
+      FLASK_SECRET_KEY: demo-no-usar-en-produccion
+      ENABLE_BACKGROUND_WORKER: "false"
+      BACKUP_ENABLED: "false"
+      # Sin red hacia fuera: la demo no le pregunta nada a Correos.
+      CORREOS_API_ENABLED: "false"
+      POSTAL_CODE: "08001"
+    tmpfs:
+      - /data

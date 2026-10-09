@@ -52,6 +52,12 @@ def get_gmail_adapters(use_mock: bool):
     gmail_oauth arrastra google-api-python-client, que no hace falta cargar
     cuando se trabaja con el mock.
     """
+    # DEMO_MODE usa un buzon inventado mas completo que el del mock: enseña
+    # todas las fuentes y sirve para las capturas del README sin sacar las
+    # compras de nadie. Ver app/demo_data.py.
+    if _env_flag("DEMO_MODE", "false"):
+        from .demo_data import demo_search_fn, demo_get_thread_fn
+        return demo_search_fn, demo_get_thread_fn
     if use_mock:
         from .mock_gmail import mock_search_fn, mock_get_thread_fn
         return mock_search_fn, mock_get_thread_fn

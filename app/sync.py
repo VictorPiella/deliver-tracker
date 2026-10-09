@@ -471,7 +471,10 @@ def ingest_event(session, event: dict) -> bool:
     # El id del propio paquete suele ser un numero de seguimiento tambien (el de
     # CTT, el de Correos). Apuntarlo permite que el email del transportista
     # encuentre el paquete aunque la tienda nunca mencione a ese transportista.
-    registrar_numero(session, package, event.get("package_id"), event.get("courier"))
+    # El id propio lleva el nombre de la FUENTE, no el del transportista: es la
+    # referencia que usa la tienda. Etiquetarlo con el courier del email hacia
+    # que el recorrido dijera "SEUR" encima del numero de pedido de la tienda.
+    registrar_numero(session, package, event.get("package_id"), event.get("source"))
     if event.get("courier") and not package.courier:
         package.courier = event["courier"]
     # La URL SI se sobreescribe cuando llega una nueva: la del email de envio es
