@@ -27,9 +27,9 @@ from .models import (
     STATUS_CANCELLED, STATUS_FINALES, STATUS_LABELS_ES, STATUS_ORDER,
 )
 from .timeutils import utcnow, a_zona_local, formatear
-from .gmail_sync import run_sync
+from .gmail_sync import parse_message, run_sync
 from .cleanup import hard_delete_package, restore_package, soft_delete_package
-from .sync import merge_packages, recompute_status_from_events
+from .sync import ingest_event, merge_packages, recompute_status_from_events
 from .tracking import (
     POSTAL_CODE, requiere_datos_a_mano, url_de_seguimiento, url_del_transportista,
 )
@@ -677,6 +677,55 @@ def register_routes(app: Flask) -> None:
             .all()
         )
         return render_template("sin_reconocer.html", emails=filas)
+
+    @app.route("/sin-reconocer/reintentar", methods=["POST"])
+    def reintentar_sin_reconocer():
+        """
+        Vuelve a pedirle estos emails a Gmail y los pasa por los parsers de hoy.
+
+        Hace falta porque el escaneo normal no los mira: solo busca correos
+        dentro de su ventana, y estos ya han quedado fuera. Un email que no se
+        entendio en septiembre no vuelve a intentarse nunca aunque el parser
+        haya aprendido a leerlo — que es justo lo que paso con los de AliExpress
+        en ingles.
+
+        Aqui no se adivina nada: se pide el email original por su id y se
+        procesa igual que el primer dia.
+        """
+        filas = g.db.query(UnparsedEmail).all()
+        if not filas:
+            flash("No hay nada que reintentar.", "info")
+            return redirect(url_for("sin_reconocer"))
+
+        traer = current_app.config["GMAIL_GET_THREAD_FN"]
+        leidos = fallos = 0
+        for fila in filas:
+            try:
+                cuerpo = traer(fila.gmail_message_id) or {}
+            except Exception:       # noqa: BLE001 - un email borrado en Gmail, p.ej.
+                fallos += 1
+                continue
+            parsed = parse_message(
+                fila.sender or "", fila.subject or "",
+                cuerpo.get("plaintext_body", ""), cuerpo.get("html_body", ""),
+                fila.gmail_message_id,
+                (fila.event_date or utcnow()).isoformat(),
+            )
+            if parsed is None:
+                continue
+            eventos = parsed if isinstance(parsed, list) else [parsed]
+            if any(ingest_event(g.db, e) for e in eventos):
+                g.db.delete(fila)
+                leidos += 1
+        g.db.commit()
+
+        if leidos:
+            flash(f"{leidos} email(s) ya se entienden y han entrado en el panel.", "success")
+        elif fallos:
+            flash(f"No se ha podido recuperar {fallos} email(s) de Gmail.", "warning")
+        else:
+            flash("Ninguno de estos emails se entiende todavía.", "info")
+        return redirect(url_for("sin_reconocer"))
 
     @app.route("/sin-reconocer/limpiar", methods=["POST"])
     def limpiar_sin_reconocer():

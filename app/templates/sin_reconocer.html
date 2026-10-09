@@ -12,6 +12,14 @@
     </p>
   </div>
   {% if emails %}
+  <form method="POST" action="{{ url_for('reintentar_sin_reconocer') }}" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn"
+            title="Vuelve a pedirle estos emails a Gmail y los pasa por los parsers de ahora. El escaneo normal no los mira: ya han quedado fuera de su ventana de búsqueda.">
+      Reintentar con los parsers de ahora
+    </button>
+  </form>
+
   <form method="POST" action="{{ url_for('limpiar_sin_reconocer') }}"
         onsubmit="return confirm('¿Descartar la lista?\n\nNo se borra ningún email de Gmail; sólo se limpia este aviso.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

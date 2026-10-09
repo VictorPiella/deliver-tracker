@@ -34,7 +34,7 @@ import os
 from datetime import datetime
 
 from .models import (
-    get_last_sync, get_session, set_last_sync, Package, UnparsedEmail,
+    get_last_sync, get_session, set_last_sync, Package, PackageEvent, UnparsedEmail,
 )
 from .timeutils import utcnow, to_utc_naive
 from .sync import (actualizar_desde_correos, evento_anclable, evento_ya_visto,
@@ -140,6 +140,51 @@ def parse_event_date(date_str: str) -> datetime:
         return to_utc_naive(datetime.fromisoformat(date_str.replace("Z", "+00:00")))
     except (ValueError, AttributeError):
         return utcnow()
+
+
+def olvidar_unparsed(session, message_id: str) -> bool:
+    """
+    Quita un email de la pantalla de "sin reconocer" porque ya se sabe leer.
+
+    Los parsers aprenden: los emails de AliExpress en ingles estuvieron semanas
+    sin entenderse y un dia se entendieron. Pero su aviso se quedaba puesto para
+    siempre, asi que esa pantalla acababa llena de falsas alarmas — y entonces
+    deja de servir para lo unico que sirve, que es avisar de que algo se ha
+    roto de verdad.
+    """
+    fila = session.query(UnparsedEmail).filter_by(gmail_message_id=message_id).first()
+    if fila is None:
+        return False
+    session.delete(fila)
+    return True
+
+
+def barrer_unparsed_resueltos(session, log=print) -> int:
+    """
+    Borra los avisos de emails que, mirandolo ahora, si acabaron entendiendose.
+
+    Hace falta ademas de olvidar_unparsed porque un email puede haberse
+    procesado por otro camino (otro parser, otra pasada) sin volver a tocar su
+    aviso.
+    """
+    from .models import EmailProcesado
+
+    ids = {m for (m,) in session.query(PackageEvent.gmail_message_id).all() if m}
+    # Y los que tienen lapida: su paquete se borro del todo a proposito, asi que
+    # el email esta entendido y enterrado. Dejarlo en "sin reconocer" decia lo
+    # contrario de lo que pasa, y encima no habia forma de quitarlo —
+    # reintentarlo no sirve, porque la lapida existe justo para que no vuelva.
+    ids |= {m for (m,) in session.query(EmailProcesado.gmail_message_id).all() if m}
+    if not ids:
+        return 0
+    sobrantes = (session.query(UnparsedEmail)
+                 .filter(UnparsedEmail.gmail_message_id.in_(ids)).all())
+    for fila in sobrantes:
+        session.delete(fila)
+    if sobrantes:
+        log(f"[gmail_sync] {len(sobrantes)} aviso(s) de 'sin reconocer' retirados: "
+            f"esos emails ya se entienden o se borraron a proposito")
+    return len(sobrantes)
 
 
 def record_unparsed(session, message_id: str, sender: str, subject: str, event_date) -> None:
@@ -324,6 +369,7 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
                 continue
             created = ingest_event(session, parsed)
             if created:
+                olvidar_unparsed(session, message_id)
                 ingested += 1
                 log(f"[gmail_sync] + correos {parsed['status']:<16} {subject[:50]}")
             else:
@@ -343,6 +389,7 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
                 continue
             created = ingest_event(session, parsed)
             if created:
+                olvidar_unparsed(session, message_id)
                 ingested += 1
                 log(f"[gmail_sync] + shopify {parsed['status']:<16} {subject[:50]}")
             else:
@@ -375,6 +422,7 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
 
             created = ingest_event(session, event)
             if created:
+                olvidar_unparsed(session, message_id)
                 ingested += 1
                 log(f"[gmail_sync] + {event['source']} {event['status']:<16} {subject[:50]}")
             else:
@@ -384,6 +432,12 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
     # del transportista). Si comparten número de seguimiento son el mismo, y se
     # juntan antes de preguntarle nada a Correos: así no se gastan dos consultas
     # en el mismo paquete.
+    # Lo que ya se entiende deja de figurar como no entendido.
+    try:
+        barrer_unparsed_resueltos(session, log=log)
+    except Exception as e:  # noqa: BLE001
+        log(f"[gmail_sync] Barrido de 'sin reconocer' omitido: {type(e).__name__}: {e}")
+
     fusionados = 0
     try:
         fusionados = fusionar_duplicados_por_numero(session, log=log)
