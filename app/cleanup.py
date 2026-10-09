@@ -26,6 +26,15 @@ from .mqtt_publish import unpublish_package
 # papelera (de donde siempre se puede recuperar). 0 desactiva el archivado.
 PURGE_DELIVERED_AFTER_DAYS = int(os.environ.get("PURGE_DELIVERED_AFTER_DAYS", "30"))
 
+# Cuanto aguanta algo en la papelera antes de borrarse de verdad. 0 la deja
+# para siempre, que era el comportamiento de antes.
+#
+# Ojo con bajarlo mucho: un paquete entregado llega a la papelera solo a los
+# PURGE_DELIVERED_AFTER_DAYS dias, asi que entre las dos cifras se decide
+# cuanto historial de compras se conserva. Con los valores por defecto son 60
+# dias desde la entrega.
+PURGE_TRASH_AFTER_DAYS = int(os.environ.get("PURGE_TRASH_AFTER_DAYS", "30"))
+
 
 def soft_delete_package(session, package: Package, motivo: str = "sin especificar",
                         log=print) -> None:
@@ -53,12 +62,25 @@ def hard_delete_package(session, package: Package) -> None:
     """
     Borrado definitivo: la fila y, en cascada, sus eventos.
 
-    OJO: al irse los eventos se pierden sus gmail_message_id, así que si los
-    emails de origen siguen dentro de la ventana de búsqueda el paquete
-    reaparecerá en el próximo escaneo. Es aceptable aquí porque es una acción
-    explícita del usuario desde la papelera, pero es justo el motivo de que el
-    borrado normal sea lógico.
+    Antes esto hacía resucitar paquetes. Al irse los eventos se perdían sus
+    gmail_message_id, que son lo que impide reprocesar un email: si los correos
+    seguían dentro de la ventana de búsqueda, el paquete volvía a aparecer en el
+    escaneo siguiente como si nada.
+
+    Ahora los identificadores se apartan antes de borrar (ver EmailProcesado).
+    Se queda la lápida, no el contenido: ni asunto, ni remitente, ni estado.
     """
+    from .models import EmailProcesado
+
+    for evento in package.events:
+        if not evento.gmail_message_id:
+            continue
+        ya = (session.query(EmailProcesado)
+              .filter_by(gmail_message_id=evento.gmail_message_id).first())
+        if ya is None:
+            session.add(EmailProcesado(gmail_message_id=evento.gmail_message_id))
+    session.flush()
+
     order_id = package.order_id
     session.delete(package)
     session.flush()
@@ -109,5 +131,46 @@ def purge_old_delivered(db_path: str, log=print) -> int:
         session.commit()
         log(f"[cleanup] {len(viejos)} paquete(s) entregados hace más de "
             f"{PURGE_DELIVERED_AFTER_DAYS} días, movidos a la papelera")
+    session.close()
+    return len(viejos)
+
+
+def vaciar_papelera_vieja(db_path: str, log=print) -> int:
+    """
+    Borra de verdad lo que lleva en la papelera mas de PURGE_TRASH_AFTER_DAYS.
+
+    Es el unico sitio del programa que destruye datos sin que nadie pulse nada,
+    asi que va con cuidado:
+
+    - Solo mira deleted_at. Lo que esta en la papelera lo mandaste tu o lo
+      archivo el limpiador de entregados; en ambos casos ya pasaron antes por
+      el paso reversible.
+    - Deja lapida de cada email (ver hard_delete_package), para que vaciarla no
+      haga reaparecer los paquetes en el siguiente escaneo.
+    - Se puede apagar entera con PURGE_TRASH_AFTER_DAYS=0.
+
+    Y lo dice en el log con nombre y fecha, porque un borrado silencioso que
+    nadie puede reconstruir despues es justo lo que no se quiere.
+    """
+    if PURGE_TRASH_AFTER_DAYS <= 0:
+        return 0
+
+    corte = utcnow() - timedelta(days=PURGE_TRASH_AFTER_DAYS)
+    session = get_session(db_path)
+    viejos = (
+        session.query(Package)
+        .filter(Package.deleted_at.isnot(None), Package.deleted_at < corte)
+        .all()
+    )
+    for package in viejos:
+        log(f"[cleanup] Borrado definitivo: id={package.id} "
+            f"({package.source}/{package.external_package_id}) "
+            f"en la papelera desde {package.deleted_at:%Y-%m-%d}")
+        hard_delete_package(session, package)
+
+    if viejos:
+        session.commit()
+        log(f"[cleanup] {len(viejos)} paquete(s) borrados definitivamente "
+            f"tras mas de {PURGE_TRASH_AFTER_DAYS} dias en la papelera")
     session.close()
     return len(viejos)

@@ -39,7 +39,7 @@ from .models import (
 from .timeutils import utcnow, to_utc_naive
 from .sync import (actualizar_desde_correos, evento_anclable, evento_ya_visto,
                    fusionar_duplicados_por_numero, ingest_event, ingest_carrier_event)
-from .parsers import amazon, aliexpress, gls, correos, shopify
+from .parsers import amazon, aliexpress, gls, correos, ctt, shopify
 
 # --- Configuración ---
 # Todas ajustables por entorno; los valores por defecto sirven para un uso normal.
@@ -79,6 +79,10 @@ ALIEXPRESS_SENDER = "transaction@notice.aliexpress.com"
 # compartido, así que se trackea como entrada independiente (ver parsers/correos.py).
 GLS_SENDER_DOMAIN = gls.SENDER_DOMAIN
 CORREOS_SENDER_DOMAIN = correos.SENDER_DOMAIN
+# CTT Express: ultima milla de AliExpress y de alguna tienda. Sus emails SI
+# traen la referencia de la tienda, asi que casi siempre se enganchan a un
+# paquete que ya seguimos (ver parsers/ctt.py).
+CTT_SENDER_DOMAIN = ctt.SENDER_DOMAIN
 
 # Shopify no tiene remitente: cada tienda manda desde su propio dominio (ver
 # parsers/shopify.py). Lo único común es el asunto de la plantilla, así que se
@@ -101,6 +105,7 @@ def build_search_query(newer_than_days: int) -> str:
     query = (
         f"({amazon_clause}) OR from:{ALIEXPRESS_SENDER} "
         f"OR from:{GLS_SENDER_DOMAIN} OR from:{CORREOS_SENDER_DOMAIN} "
+        f"OR from:{CTT_SENDER_DOMAIN} "
         f"OR ({SHOPIFY_CLAUSE})"
     )
     query += f" newer_than:{newer_than_days}d"
@@ -218,7 +223,7 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
         candidato_shopify = shopify.posible(subject)
         if not (amazon.matches(sender) or aliexpress.matches(sender)
                 or gls.matches(sender) or correos.matches(sender)
-                or candidato_shopify):
+                or ctt.matches(sender) or candidato_shopify):
             irrelevant += 1
             continue
 
@@ -256,6 +261,37 @@ def run_sync(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=print) -> d
             if created:
                 ingested += 1
                 log(f"[gmail_sync] + gls {parsed['status']:<16} (entrada propia) {subject[:40]}")
+            else:
+                duplicated += 1
+            continue
+
+        if ctt.matches(sender):
+            event_date = parse_event_date(date_str)
+            parsed = ctt.parse(sender, subject, plaintext_body or "", message_id,
+                               event_date, html_body=html_body or "")
+            if parsed is None:
+                record_unparsed(session, message_id, sender, subject, event_date)
+                unparsed += 1
+                continue
+
+            if evento_ya_visto(session, message_id):
+                duplicated += 1
+                continue
+
+            # Lo normal: colgarlo del paquete de la tienda, que es el que trae
+            # el nombre y la imagen. CTT solo reparte.
+            if ingest_carrier_event(session, parsed, courier="ctt"):
+                ingested += 1
+                log(f"[gmail_sync] + ctt {parsed['status']:<16} {subject[:46]}")
+                continue
+
+            # Y si no hay a qué engancharlo, fila propia antes que tirarlo. Pasa
+            # cuando la referencia de CTT no aparece en ningún email de la
+            # tienda: mejor una fila de más, con su estado de verdad, que un
+            # envío que no existe para el panel.
+            if ingest_event(session, ctt.como_entrada_propia(parsed)):
+                ingested += 1
+                log(f"[gmail_sync] + ctt {parsed['status']:<16} (entrada propia) {subject[:34]}")
             else:
                 duplicated += 1
             continue

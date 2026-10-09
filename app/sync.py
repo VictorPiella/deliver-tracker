@@ -7,7 +7,7 @@ emails desordenados o duplicados no rebobinen el estado).
 import re
 from datetime import datetime
 from sqlalchemy.exc import IntegrityError
-from .models import (Order, OrderItem, Package, PackageEvent, STATUS_CANCELLED,
+from .models import (EmailProcesado, Order, OrderItem, Package, PackageEvent, STATUS_CANCELLED,
                      STATUS_FINALES, STATUS_ORDER)
 
 
@@ -277,6 +277,13 @@ def ingest_event(session, event: dict) -> bool:
     Procesa un evento normalizado (salida de los parsers) y lo persiste.
     Devuelve True si se ha creado un evento nuevo, False si ya existía (duplicado, mismo message_id).
     """
+    # Un email borrado con su paquete deja lápida: se reconoce igual aunque ya
+    # no quede ni el evento ni la fila. Sin esto, vaciar la papelera hacía
+    # reaparecer los paquetes en el siguiente escaneo.
+    if session.query(EmailProcesado).filter_by(
+            gmail_message_id=event["message_id"]).first() is not None:
+        return False
+
     # Evitar reprocesar el mismo email
     existing = (
         session.query(PackageEvent)
@@ -469,6 +476,12 @@ def ingest_carrier_event(session, event: dict, courier: str) -> bool:
         package.courier = courier
     if event.get("tracking_number") and not package.courier_tracking_number:
         package.courier_tracking_number = event["tracking_number"]
+    # La fecha prevista de entrega la da el transportista, no la tienda, asi que
+    # es justo aqui donde llega la buena. Se pisa la anterior a proposito: la
+    # ultima que mandan es la que vale. Sin esto, CTT anunciaba la entrega para
+    # el dia 13 y el panel no lo contaba.
+    if event.get("eta"):
+        package.eta = event["eta"]
 
     try:
         session.commit()

@@ -114,6 +114,13 @@
       </form>
       <div class="pkg-meta">
         <span class="chip chip-{{ p.source }}">{{ p.source }}</span>
+        {% if p.posible_duplicado %}
+        <a class="chip chip-duplicado"
+           href="{{ url_for('package_detail', package_id=p.id) }}"
+           title="Hay {{ p.posible_duplicado|length }} paquete{{ '' if p.posible_duplicado|length == 1 else 's' }} más con este mismo nombre, pero de otro pedido. Puede ser una compra repetida de verdad, o el mismo envío por duplicado — entra y fusiónalos si lo son.">
+          ¿repetido?
+        </a>
+        {% endif %}
         <span class="mono">#{{ p.external_package_id }}</span>
         <span class="dot">·</span>
         <span class="nowrap">{{ p.n_events }} evento{{ '' if p.n_events == 1 else 's' }}</span>
@@ -407,7 +414,11 @@
   //
   // Los campos de texto sí se respetan: ahí arrastrar es seleccionar letras, y
   // eso no hay que quitárselo a nadie.
-  lista.addEventListener('mousedown', (e) => {
+  // Escucha en todo el documento, no sólo en la lista: empezar el recuadro
+  // desde el margen de la página es justo lo natural, y obligando a arrancar
+  // encima de una fila quedaba a medias — el gesto típico es ir al hueco de al
+  // lado y barrer hacia dentro.
+  document.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     if (e.target.closest('input, textarea, select, [contenteditable]')) return;
     arrastrando = true;
@@ -420,7 +431,7 @@
   // El navegador quiere arrastrar los enlaces y las imágenes por su cuenta
   // (para soltarlos en otra ventana). Con eso activo, el arrastre se convertía
   // en un "fantasma" del enlace pegado al cursor y la goma no aparecía.
-  lista.addEventListener('dragstart', (e) => {
+  document.addEventListener('dragstart', (e) => {
     if (arrastrando) e.preventDefault();
   });
 
@@ -484,6 +495,15 @@
       filas().forEach(f => seleccion.add(f.dataset.id));
       pintar();
     }
+  });
+
+  // Un click en el vacío suelta la selección, como en cualquier escritorio.
+  // Va en 'mouseup' y no en 'click' para no pelearse con el click que se anula
+  // después de arrastrar.
+  document.addEventListener('mouseup', (e) => {
+    if (huboArrastre) return;
+    if (e.target.closest('.pkg, .barra-seleccion, a, button, input, select, textarea')) return;
+    if (seleccion.size) limpiar();
   });
 
   barra.addEventListener('click', (e) => {

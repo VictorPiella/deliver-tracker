@@ -602,6 +602,7 @@ main {
 .thumb-fallback.correos    { background: var(--s-blue-bg); color: var(--s-blue); }
 .thumb-fallback.gls        { background: var(--s-violet-bg); color: var(--s-violet); }
 .thumb-fallback.shopify    { background: var(--s-green-bg); color: var(--s-green); }
+.thumb-fallback.ctt        { background: var(--s-cyan-bg); color: var(--s-cyan); }
 
 .pkg-body { min-width: 0; }
 
@@ -655,6 +656,7 @@ main {
 .chip-correos    { background: var(--s-blue-bg); color: var(--s-blue); }
 .chip-gls        { background: var(--s-violet-bg); color: var(--s-violet); }
 .chip-shopify    { background: var(--s-green-bg); color: var(--s-green); }
+.chip-ctt        { background: var(--s-cyan-bg); color: var(--s-cyan); }
 
 /* ----------------------------------------------------------------- estado */
 
@@ -1403,3 +1405,15 @@ a.thumb-wrap:hover .thumb { border-color: var(--accent); }
   .barra-seleccion { flex-wrap: wrap; }
   .barra-seleccion-pista { display: none; }
 }
+
+
+/* Aviso de posible repetido. No los junta nadie automaticamente: dos pedidos
+   del mismo producto pueden ser los dos buenos (pedir, cancelar, repedir). */
+.chip-duplicado {
+  background: var(--s-amber-bg);
+  color: var(--s-amber);
+  text-transform: none;
+  cursor: help;
+  text-decoration: none;
+}
+.chip-duplicado:hover { outline: 1px solid var(--s-amber); }

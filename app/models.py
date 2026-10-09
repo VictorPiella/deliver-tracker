@@ -60,6 +60,26 @@ class OrderItem(Base):
     order = relationship("Order", back_populates="items")
 
 
+class EmailProcesado(Base):
+    """
+    La lapida de un evento borrado: solo su gmail_message_id.
+
+    Hace falta porque borrar de verdad un paquete se lleva sus eventos, y con
+    ellos los identificadores que impiden reprocesar un email. Si los correos
+    siguen dentro de la ventana de escaneo, el paquete reaparece al rato — por
+    eso el borrado normal es logico y no fisico.
+
+    Guardando solo el identificador se puede vaciar la papelera de verdad sin
+    que nada resucite: pesa unos pocos bytes por email y no contiene nada del
+    contenido, ni asunto, ni remitente.
+    """
+    __tablename__ = "emails_procesados"
+
+    id = Column(Integer, primary_key=True)
+    gmail_message_id = Column(String, nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=utcnow)
+
+
 class Package(Base):
     __tablename__ = "packages"
 

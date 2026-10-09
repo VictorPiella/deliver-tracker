@@ -178,6 +178,41 @@ def _instalar_csrf(app: Flask) -> None:
 _TITULO_INUTIL_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{0,7}$")
 
 
+def _clave_de_parecido(nombre: str) -> str:
+    """Normaliza un nombre para comparar: sin mayúsculas, sin signos, sin dobles espacios."""
+    return re.sub(r"[^a-z0-9 ]+", " ", (nombre or "").lower()).strip()[:45]
+
+
+def marcar_posibles_duplicados(filas: list) -> None:
+    """
+    Marca las filas que se llaman igual pero son pedidos distintos.
+
+    NO las junta, y es a propósito. Pasa de verdad que el mismo producto esté
+    dos veces por motivos buenos: pedir algo, cancelarlo a los seis minutos y
+    volver a pedirlo deja dos pedidos legítimos con el mismo nombre. Y pasa por
+    motivos malos: Amazon reemplaza un pedido por otro y el viejo se queda
+    clavado en "Pedido realizado" para siempre.
+
+    Desde fuera son idénticos — distinto número de pedido, distinto número de
+    envío, ningún dato compartido — así que la app no puede distinguirlos sin
+    inventar. Lo único honesto es señalarlos y que decidas tú, que para eso
+    está el botón de fusionar.
+    """
+    por_nombre = {}
+    for fila in filas:
+        clave = _clave_de_parecido(fila.get("title"))
+        if len(clave) < 8:          # nombres muy cortos se parecen por casualidad
+            continue
+        por_nombre.setdefault(clave, []).append(fila)
+
+    for grupo in por_nombre.values():
+        if len(grupo) < 2:
+            continue
+        for fila in grupo:
+            fila["posible_duplicado"] = [otra["id"] for otra in grupo
+                                         if otra["id"] != fila["id"]]
+
+
 def nombre_visible(package) -> str:
     """
     Cómo llamar a un paquete en el panel, de mejor a peor:
@@ -313,6 +348,8 @@ def register_routes(app: Flask) -> None:
         } for p in packages]
 
         # "Finalizado" incluye los cancelados: un pedido cancelado no está en
+        marcar_posibles_duplicados(data)
+
         # tránsito, pero tampoco se ha entregado.
         resumen = {
             "total": len(data),

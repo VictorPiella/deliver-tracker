@@ -10,7 +10,7 @@ from datetime import timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from .gmail_sync import run_sync, SYNC_INTERVAL_MINUTES
 from .backup import backup_if_due
-from .cleanup import purge_old_delivered
+from .cleanup import purge_old_delivered, vaciar_papelera_vieja
 from .mqtt_publish import publish_all_packages
 from .timeutils import utcnow
 
@@ -49,6 +49,10 @@ def trigger_sync_now(db_path: str, gmail_search_fn, gmail_get_thread_fn, log=pri
         try:
             resumen = run_sync(db_path, gmail_search_fn, gmail_get_thread_fn, log=log)
             purge_old_delivered(db_path, log=log)
+            # Y despues el borrado definitivo de lo que lleva demasiado en la
+            # papelera. En este orden a proposito: lo que se archiva hoy empieza
+            # a contar hoy, no se archiva y se borra en la misma pasada.
+            vaciar_papelera_vieja(db_path, log=log)
             publish_all_packages(db_path, log=log)
             # Como mucho una copia al día, justo después de que la base cambie.
             backup_if_due(db_path, log=log)
