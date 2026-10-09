@@ -144,3 +144,84 @@ class TestReintentarLosQueQuedaronFuera:
     def test_sin_nada_que_reintentar_lo_dice(self, client):
         r = client.post("/sin-reconocer/reintentar", follow_redirects=True)
         assert "No hay nada que reintentar" in r.get_data(as_text=True)
+
+
+class TestDescartarAvisosAMano:
+    """
+    A veces un aviso es correcto y aun así no quieres volver a verlo: una
+    promoción de Amazon que nunca será un paquete, un email raro de una sola
+    vez. Descartarlo es decir "ya lo he mirado", no "esto se entiende".
+    """
+
+    def test_se_descarta_uno_solo(self, client, db_path):
+        aviso(db_path, "m1", subject="Uno")
+        aviso(db_path, "m2", subject="Dos")
+
+        s = get_session(db_path)
+        uno = s.query(UnparsedEmail).filter_by(subject="Uno").one().id
+        s.close()
+
+        client.post(f"/sin-reconocer/{uno}/descartar")
+
+        # La fila no se borra, se marca: borrarla haría que el escaneo la
+        # volviera a crear. Lo que cambia es lo que se ve.
+        s = get_session(db_path)
+        visibles = [f.subject for f in s.query(UnparsedEmail)
+                    .filter(UnparsedEmail.descartado_at.is_(None)).all()]
+        assert visibles == ["Dos"]
+        assert s.query(UnparsedEmail).count() == 2
+        s.close()
+
+        html = client.get("/sin-reconocer").get_data(as_text=True)
+        assert html.count("btn-descartar") == 1
+
+    def test_lo_dice_al_descartar(self, client, db_path):
+        aviso(db_path, "m1", subject="Plantilla rarisima")
+        s = get_session(db_path)
+        aid = s.query(UnparsedEmail).one().id
+        s.close()
+
+        r = client.post(f"/sin-reconocer/{aid}/descartar", follow_redirects=True)
+        assert "Plantilla rarisima" in r.get_data(as_text=True)
+
+    def test_un_aviso_que_no_existe_da_404(self, client):
+        assert client.post("/sin-reconocer/99999/descartar").status_code == 404
+
+    def test_descartar_no_lo_devuelve_en_el_siguiente_escaneo(self, client, db_path):
+        """
+        Lo que haría inútil el botón: que el escaneo volviera a ponerlo. No
+        pasa, porque el email ya consta como visto por su gmail_message_id.
+        """
+        aviso(db_path, "ali-1", subject="Plantilla que nadie sabe leer")
+        s = get_session(db_path)
+        aid = s.query(UnparsedEmail).one().id
+        s.close()
+        client.post(f"/sin-reconocer/{aid}/descartar")
+
+        run_sync(db_path,
+                 lambda q: [{"id": "ali-1", "subject": "Plantilla que nadie sabe leer",
+                             "sender": REMITENTE_ALI,
+                             "date": "2026-10-01T10:00:00+00:00"}],
+                 lambda m: {"plaintext_body": "", "html_body": ""},
+                 log=lambda *a: None)
+
+        # La fila sigue ahí, marcada: borrarla haría que el escaneo la creara
+        # otra vez. Lo que importa es que no vuelva a la pantalla.
+        #
+        # Se cuentan los botones de descartar y no el texto del asunto: el
+        # asunto sale igualmente en el mensaje de "Aviso descartado: ...", así
+        # que buscarlo en la página daba un falso fallo.
+        html = client.get("/sin-reconocer").get_data(as_text=True)
+        assert html.count("btn-descartar") == 0
+
+        s = get_session(db_path)
+        assert s.query(UnparsedEmail).filter(
+            UnparsedEmail.descartado_at.is_(None)).count() == 0
+        s.close()
+
+    def test_cada_fila_trae_su_boton(self, client, db_path):
+        aviso(db_path, "m1", subject="Uno")
+        aviso(db_path, "m2", subject="Dos")
+        html = client.get("/sin-reconocer").get_data(as_text=True)
+        assert html.count("btn-descartar") == 2
+        assert html.count('name="csrf_token"') >= 2

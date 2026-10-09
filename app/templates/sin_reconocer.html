@@ -32,7 +32,7 @@
 <div class="card">
   <table class="tabla">
     <thead>
-      <tr><th>Fecha</th><th>Remitente</th><th>Asunto</th></tr>
+      <tr><th>Fecha</th><th>Remitente</th><th>Asunto</th><th></th></tr>
     </thead>
     <tbody>
       {% for e in emails %}
@@ -40,6 +40,14 @@
         <td class="celda-fecha">{{ e.event_date|local('%d %b %Y · %H:%M') }}</td>
         <td class="celda-remitente mono">{{ e.sender }}</td>
         <td>{{ e.subject or '(sin asunto)' }}</td>
+        <td class="celda-accion">
+          <form method="POST" action="{{ url_for('descartar_sin_reconocer', aviso_id=e.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="btn-descartar"
+                    title="Descartar este aviso. No borra el email de Gmail ni ningún paquete."
+                    aria-label="Descartar este aviso">&times;</button>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     </tbody>

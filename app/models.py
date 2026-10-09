@@ -186,6 +186,11 @@ class UnparsedEmail(Base):
     subject = Column(String)
     event_date = Column(DateTime)
     seen_at = Column(DateTime, default=utcnow)
+    # Cuando lo descartaste tu. La fila NO se borra a proposito: si se borrara,
+    # el escaneo siguiente volveria a crearla — record_unparsed solo mira si ya
+    # existe — y el boton de descartar no serviria para nada justo en el caso
+    # que importa, un email que llega una y otra vez.
+    descartado_at = Column(DateTime, index=True)
 
 
 class AppSetting(Base):
@@ -358,6 +363,8 @@ _MIGRATIONS = [
      "ALTER TABLE packages ADD COLUMN tracking_url VARCHAR"),
     ("packages", "title",
      "ALTER TABLE packages ADD COLUMN title VARCHAR"),
+    ("unparsed_emails", "descartado_at",
+     "ALTER TABLE unparsed_emails ADD COLUMN descartado_at DATETIME"),
 ]
 
 

@@ -672,6 +672,7 @@ def register_routes(app: Flask) -> None:
         """
         filas = (
             g.db.query(UnparsedEmail)
+            .filter(UnparsedEmail.descartado_at.is_(None))
             .order_by(UnparsedEmail.event_date.desc())
             .limit(200)
             .all()
@@ -692,7 +693,8 @@ def register_routes(app: Flask) -> None:
         Aqui no se adivina nada: se pide el email original por su id y se
         procesa igual que el primer dia.
         """
-        filas = g.db.query(UnparsedEmail).all()
+        filas = (g.db.query(UnparsedEmail)
+                 .filter(UnparsedEmail.descartado_at.is_(None)).all())
         if not filas:
             flash("No hay nada que reintentar.", "info")
             return redirect(url_for("sin_reconocer"))
@@ -727,11 +729,35 @@ def register_routes(app: Flask) -> None:
             flash("Ninguno de estos emails se entiende todavía.", "info")
         return redirect(url_for("sin_reconocer"))
 
+    @app.route("/sin-reconocer/<int:aviso_id>/descartar", methods=["POST"])
+    def descartar_sin_reconocer(aviso_id):
+        """
+        Quita un aviso suelto.
+
+        No borra el email de Gmail ni toca ningun paquete: solo dice "este ya
+        lo he mirado". Y como el aviso se apunta por gmail_message_id, el
+        escaneo siguiente no lo vuelve a poner — ese email ya consta como visto.
+        """
+        fila = g.db.get(UnparsedEmail, aviso_id)
+        if fila is None:
+            return "Aviso no encontrado", 404
+
+        asunto = (fila.subject or "(sin asunto)")[:60]
+        fila.descartado_at = utcnow()
+        g.db.commit()
+        flash(f"Aviso descartado: {asunto}", "success")
+        return redirect(url_for("sin_reconocer"))
+
     @app.route("/sin-reconocer/limpiar", methods=["POST"])
     def limpiar_sin_reconocer():
-        n = g.db.query(UnparsedEmail).delete()
+        # Marcados, no borrados, por lo mismo que uno a uno: borrarlos haria
+        # que el escaneo siguiente los pusiera otra vez.
+        pendientes = (g.db.query(UnparsedEmail)
+                      .filter(UnparsedEmail.descartado_at.is_(None)).all())
+        for fila in pendientes:
+            fila.descartado_at = utcnow()
         g.db.commit()
-        flash(f"{n} email(s) descartados de la lista.", "success")
+        flash(f"{len(pendientes)} email(s) descartados de la lista.", "success")
         return redirect(url_for("sin_reconocer"))
 
     @app.route("/package/<int:package_id>/status", methods=["POST"])
